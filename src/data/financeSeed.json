@@ -1,0 +1,205 @@
+{
+  "householdName": "Ledgerline",
+  "accounts": [
+    {
+      "id": "acct-wf-checking",
+      "name": "Wells Fargo Checking",
+      "institution": "Wells Fargo",
+      "type": "checking",
+      "source": "imported",
+      "openingBalance": 0,
+      "lastSynced": "2026-04-05"
+    },
+    {
+      "id": "acct-wf-savings",
+      "name": "Wells Fargo Savings",
+      "institution": "Wells Fargo",
+      "type": "savings",
+      "source": "imported",
+      "openingBalance": 0,
+      "lastSynced": "2026-04-05"
+    },
+    {
+      "id": "acct-travel-card",
+      "name": "Travel Card",
+      "institution": "Manual",
+      "type": "credit",
+      "source": "manual",
+      "openingBalance": -325.14,
+      "lastSynced": "2026-04-04"
+    },
+    {
+      "id": "acct-cash",
+      "name": "Cash Ledger",
+      "institution": "Manual",
+      "type": "cash",
+      "source": "manual",
+      "openingBalance": 120.0,
+      "lastSynced": "2026-04-03"
+    }
+  ],
+  "transactions": [
+    {
+      "id": "tx-001",
+      "accountId": "acct-wf-checking",
+      "date": "2026-04-05",
+      "payee": "Payroll Deposit",
+      "amount": 3920.0,
+      "category": "Income",
+      "source": "imported",
+      "reviewed": true,
+      "notes": "Direct deposit"
+    },
+    {
+      "id": "tx-002",
+      "accountId": "acct-wf-checking",
+      "date": "2026-04-05",
+      "payee": "Mortgage Payment",
+      "amount": -1285.44,
+      "category": "Housing",
+      "source": "imported",
+      "reviewed": true,
+      "notes": "Auto-pay"
+    },
+    {
+      "id": "tx-003",
+      "accountId": "acct-wf-checking",
+      "date": "2026-04-04",
+      "payee": "H-E-B",
+      "amount": -146.32,
+      "category": "Groceries",
+      "source": "imported",
+      "reviewed": false,
+      "notes": "Weekly food run"
+    },
+    {
+      "id": "tx-004",
+      "accountId": "acct-wf-checking",
+      "date": "2026-04-03",
+      "payee": "Austin Energy",
+      "amount": -118.95,
+      "category": "Utilities",
+      "source": "imported",
+      "reviewed": false,
+      "notes": "Electric bill"
+    },
+    {
+      "id": "tx-005",
+      "accountId": "acct-wf-checking",
+      "date": "2026-04-03",
+      "payee": "Transfer to Savings",
+      "amount": -500.0,
+      "category": "Transfer",
+      "source": "imported",
+      "reviewed": true
+    },
+    {
+      "id": "tx-006",
+      "accountId": "acct-wf-checking",
+      "date": "2026-04-02",
+      "payee": "Shell",
+      "amount": -46.18,
+      "category": "Fuel",
+      "source": "imported",
+      "reviewed": false
+    },
+    {
+      "id": "tx-007",
+      "accountId": "acct-wf-checking",
+      "date": "2026-04-01",
+      "payee": "Spotify",
+      "amount": -11.99,
+      "category": "Subscriptions",
+      "source": "imported",
+      "reviewed": false
+    },
+    {
+      "id": "tx-008",
+      "accountId": "acct-wf-savings",
+      "date": "2026-04-03",
+      "payee": "Transfer from Checking",
+      "amount": 500.0,
+      "category": "Transfer",
+      "source": "imported",
+      "reviewed": true
+    },
+    {
+      "id": "tx-009",
+      "accountId": "acct-wf-savings",
+      "date": "2026-03-28",
+      "payee": "Interest Payout",
+      "amount": 14.22,
+      "category": "Income",
+      "source": "imported",
+      "reviewed": true
+    },
+    {
+      "id": "tx-010",
+      "accountId": "acct-travel-card",
+      "date": "2026-04-04",
+      "payee": "United Airlines",
+      "amount": -265.4,
+      "category": "Travel",
+      "source": "imported",
+      "reviewed": false
+    },
+    {
+      "id": "tx-011",
+      "accountId": "acct-travel-card",
+      "date": "2026-04-02",
+      "payee": "Uber",
+      "amount": -24.18,
+      "category": "Travel",
+      "source": "imported",
+      "reviewed": false
+    },
+    {
+      "id": "tx-012",
+      "accountId": "acct-travel-card",
+      "date": "2026-04-01",
+      "payee": "Client Dinner",
+      "amount": -89.23,
+      "category": "Dining",
+      "source": "manual",
+      "reviewed": true
+    },
+    {
+      "id": "tx-013",
+      "accountId": "acct-cash",
+      "date": "2026-04-05",
+      "payee": "Farmers Market",
+      "amount": -38.0,
+      "category": "Groceries",
+      "source": "manual",
+      "reviewed": true
+    },
+    {
+      "id": "tx-014",
+      "accountId": "acct-cash",
+      "date": "2026-04-03",
+      "payee": "ATM Withdrawal",
+      "amount": 80.0,
+      "category": "Transfer",
+      "source": "manual",
+      "reviewed": true
+    }
+  ],
+  "imports": [
+    {
+      "id": "imp-001",
+      "fileName": "wells-fargo-account-activity.csv",
+      "format": "csv",
+      "rows": 6,
+      "importedAt": "2026-04-05T16:12:00.000Z",
+      "note": "Spreadsheet export from Wells Fargo account activity"
+    },
+    {
+      "id": "imp-002",
+      "fileName": "wells-fargo-statement.pdf",
+      "format": "pdf",
+      "rows": 8,
+      "importedAt": "2026-04-05T16:28:00.000Z",
+      "note": "Text-extracted statement import"
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "name": "ledgerline-finance",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "build:web": "expo export -p web",
+    "test": "node --import tsx --test src/finance/import.test.ts src/finance/ledger.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~55.0.6",
+    "expo-document-picker": "^55.0.11",
+    "expo-status-bar": "~55.0.4",
+    "pdfjs-dist": "^5.6.205",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-native": "0.83.2",
+    "react-native-web": "^0.21.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "@types/react": "~19.2.2",
+    "tsx": "^4.21.0",
+    "typescript": "~5.9.2"
+  },
+  "private": true
+}

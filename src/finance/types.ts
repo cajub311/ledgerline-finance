@@ -1,0 +1,80 @@
+export type AccountType = 'checking' | 'savings' | 'credit' | 'cash' | 'loan' | 'investment';
+export type AccountSource = 'imported' | 'manual';
+export type ImportFormat = 'csv' | 'xlsx' | 'pdf' | 'text';
+export type TransactionSource = 'imported' | 'manual';
+
+export interface FinanceAccount {
+  id: string;
+  name: string;
+  institution: string;
+  type: AccountType;
+  source: AccountSource;
+  openingBalance: number;
+  lastSynced: string;
+  notes?: string;
+}
+
+export interface FinanceTransaction {
+  id: string;
+  accountId: string;
+  date: string;
+  payee: string;
+  amount: number;
+  category: string;
+  source: TransactionSource;
+  reviewed: boolean;
+  notes?: string;
+}
+
+export interface ImportRecord {
+  id: string;
+  fileName: string;
+  format: ImportFormat;
+  rows: number;
+  importedAt: string;
+  note: string;
+}
+
+export interface FinanceState {
+  version: 1;
+  householdName: string;
+  currency: 'USD';
+  accounts: FinanceAccount[];
+  transactions: FinanceTransaction[];
+  imports: ImportRecord[];
+}
+
+export interface ManualTransactionDraft {
+  accountId: string;
+  date: string;
+  payee: string;
+  amount: string;
+  category: string;
+  notes: string;
+}
+
+export interface ParsedStatementRow {
+  date: string;
+  payee: string;
+  amount: number;
+  category: string;
+  notes?: string;
+}
+
+export interface ParsedStatementBatch {
+  format: ImportFormat;
+  rows: ParsedStatementRow[];
+  sourceLabel: string;
+  notes: string[];
+}
+
+export interface FinanceSummary {
+  netWorth: number;
+  liquidCash: number;
+  monthIncome: number;
+  monthSpend: number;
+  uncategorizedCount: number;
+  unreviewedCount: number;
+  importedRows: number;
+  importedFiles: number;
+}
