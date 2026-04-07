@@ -46,6 +46,7 @@ import {
   updateTransactionCategory,
   type FinanceState,
 } from '../finance';
+import { buildTransactionsCsv } from '../finance/export';
 import { parseStatementBlob } from '../finance/import';
 import { parseStatementText } from '../finance/import.shared';
 import { clearFinanceState as clearFinanceStorage, loadFinanceState, saveFinanceState } from '../finance/storage';
@@ -245,6 +246,18 @@ export default function FinanceApp() {
     setImportMessage('Demo ledger restored.');
     setSearchQuery('');
     setPastedStatement('');
+  }
+
+  function exportCsv() {
+    const csv = buildTransactionsCsv(state);
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const date = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `ledgerline-export-${date}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   function addManualEntry() {
@@ -828,6 +841,11 @@ export default function FinanceApp() {
               <Pressable style={styles.secondaryButton} onPress={resetWorkspace}>
                 <Text style={styles.secondaryButtonText}>Reset demo</Text>
               </Pressable>
+              {Platform.OS === 'web' && state.transactions.length > 0 ? (
+                <Pressable style={styles.secondaryButton} onPress={exportCsv}>
+                  <Text style={styles.secondaryButtonText}>Export CSV</Text>
+                </Pressable>
+              ) : null}
             </View>
             <TextInput
               style={styles.textArea}
