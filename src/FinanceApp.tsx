@@ -1,5 +1,4 @@
 ﻿import { StatusBar } from 'expo-status-bar';
-import * as DocumentPicker from 'expo-document-picker';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -14,6 +13,7 @@ import {
 } from 'react-native';
 
 import { FinanceCard } from './components/finance/FinanceCard';
+import { ImportHubSection } from './components/finance/ImportHubSection';
 import { InsightBadge } from './components/finance/InsightBadge';
 import { SpendingBar } from './components/finance/SpendingBar';
 import { SummaryTile } from './components/finance/SummaryTile';
@@ -48,11 +48,16 @@ import {
   updateGoalProgress,
   updateTransactionCategory,
   type FinanceState,
+  parseFinanceBackupJson,
+  serializeFinanceState,
 } from './finance';
 import { buildTransactionsCsv } from './finance/export';
 import { parseStatementBlob } from './finance/import';
 import { parseStatementText } from './finance/import.shared';
-import { clearFinanceState as clearFinanceStorage, loadFinanceState, saveFinanceState } from './finance/storage';
+import { clearFinanceState as clearFinanceStorage, loadFinanceState } from './finance/storage';
+import { useDebouncedFinancePersistence } from './hooks/useDebouncedFinancePersistence';
+import { formatCurrency, formatIsoDate, getErrorMessage } from './utils/format';
+import { pickWebStatementFiles } from './utils/webFilePicker';
 
 const palette = {
   bg: '#071218',
@@ -117,6 +122,13 @@ export default function FinanceApp() {
         }
 
         setState(rehydrateFinanceState(saved));
+      } catch (error) {
+        if (mounted) {
+          setImportMessage(`Could not load saved data (${getErrorMessage(error)}). Using a fresh ledger.`);
+        }
+        if (mounted) {
+          setState(createFinanceState());
+        }
       } finally {
         if (mounted) {
           setLoading(false);
@@ -129,13 +141,7 @@ export default function FinanceApp() {
     };
   }, []);
 
-  useEffect(() => {
-    if (loading) {
-      return;
-    }
-
-    void saveFinanceState(state);
-  }, [loading, state]);
+  useDebouncedFinancePersistence(state, loading);
 
   const summary = useMemo(() => getFinanceSummary(state), [state]);
   const accounts = useMemo(() => getAccountsWithBalances(state), [state]);
@@ -270,6 +276,10 @@ export default function FinanceApp() {
   }
 
   function exportCsv() {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') {
+      return;
+    }
+
     const csv = buildTransactionsCsv(state);
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -279,6 +289,44 @@ export default function FinanceApp() {
     a.download = `ledgerline-export-${date}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  function exportBackup() {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') {
+      return;
+    }
+
+    const json = serializeFinanceState(state);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const date = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `ledgerline-backup-${date}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setImportMessage('Backup downloaded. Store it somewhere safe — it contains your full ledger.');
+  }
+
+  function importBackupFromFileList(files: FileList | null | undefined) {
+    const file = files?.[0];
+    if (!file) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        const text = await file.text();
+        const next = parseFinanceBackupJson(text);
+        setState(next);
+        setSelectedAccountId(next.accounts[0]?.id ?? '');
+        setSelectedTransactionId(next.transactions[0]?.id ?? '');
+        setPastedStatement('');
+        setImportMessage(`Restored ledger from ${file.name}.`);
+      } catch (error) {
+        setImportMessage(`Backup import failed: ${getErrorMessage(error)}`);
+      }
+    })();
   }
 
   function addManualEntry() {
@@ -326,27 +374,16 @@ export default function FinanceApp() {
     setImporting(true);
 
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        multiple: true,
-        copyToCacheDirectory: true,
-        type: [
-          'application/pdf',
-          'text/csv',
-          'application/csv',
-          'application/vnd.ms-excel',
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        ],
-      });
+      const webFiles = await pickWebStatementFiles();
 
-      if (result.canceled || !result.assets.length) {
+      if (!webFiles.length) {
         setImportMessage('Import cancelled.');
         return;
       }
 
       const batches: Awaited<ReturnType<typeof parseStatementBlob>>[] = [];
 
-      for (const asset of result.assets) {
-        const file = await assetToFile(asset);
+      for (const file of webFiles) {
         const batch = await parseStatementBlob(file);
         batches.push(batch);
       }
@@ -365,7 +402,7 @@ export default function FinanceApp() {
       const importedRows = batches.reduce((sum, batch) => sum + batch.rows.length, 0);
       const warnings = batches.reduce((sum, batch) => sum + batch.notes.length, 0);
       setImportMessage(
-        `Imported ${result.assets.length} file${result.assets.length === 1 ? '' : 's'} and ${importedRows} row${importedRows === 1 ? '' : 's'} into ${selectedAccount?.name ?? 'the selected account'}.${warnings > 0 ? ` ${warnings} parsing note${warnings === 1 ? '' : 's'} were added.` : ''}`,
+        `Imported ${webFiles.length} file${webFiles.length === 1 ? '' : 's'} and ${importedRows} row${importedRows === 1 ? '' : 's'} into ${selectedAccount?.name ?? 'the selected account'}.${warnings > 0 ? ` ${warnings} parsing note${warnings === 1 ? '' : 's'} were added.` : ''}`,
       );
     } catch (error) {
       setImportMessage(`Import failed: ${getErrorMessage(error)}`);
@@ -887,81 +924,26 @@ export default function FinanceApp() {
           )}
         </FinanceCard>
 
-        <FinanceCard title="Import hub" eyebrow="Statements" tone="accent">
-          <Text style={styles.bodyText}>
-            Upload Wells Fargo statements as PDF, CSV, XLS, or XLSX on web. Paste statement text on
-            any device to keep the review loop moving. Add a manual transaction below when a cash
-            purchase or a missing line needs to enter the same ledger.
-          </Text>
-          <View style={styles.importControls}>
-            <View style={styles.importButtonRow}>
-              <Pressable
-                style={[styles.primaryButton, importing && styles.buttonDisabled]}
-                disabled={importing}
-                onPress={() => void importStatementFiles()}
-              >
-                <Text style={styles.primaryButtonText}>
-                  {importing ? 'Importing...' : Platform.OS === 'web' ? 'Upload statements' : 'Web uploads'}
-                </Text>
-              </Pressable>
-              <Pressable style={styles.secondaryButton} onPress={resetWorkspace}>
-                <Text style={styles.secondaryButtonText}>Reset demo</Text>
-              </Pressable>
-              {Platform.OS === 'web' && state.transactions.length > 0 ? (
-                <Pressable style={styles.secondaryButton} onPress={exportCsv}>
-                  <Text style={styles.secondaryButtonText}>Export CSV</Text>
-                </Pressable>
-              ) : null}
-            </View>
-            <TextInput
-              style={styles.textArea}
-              multiline
-              placeholder="Paste Wells Fargo statement text or CSV rows here."
-              placeholderTextColor="#7d9aa0"
-              value={pastedStatement}
-              onChangeText={setPastedStatement}
-            />
-            <View style={styles.importButtonRow}>
-              <Pressable style={styles.secondaryButton} onPress={importPastedStatement}>
-                <Text style={styles.secondaryButtonText}>Import pasted text</Text>
-              </Pressable>
-              <Pressable
-                style={styles.secondaryButton}
-                onPress={() =>
-                  setImportMessage(
-                    'Tip: if you only have a PDF, copy the statement text or use the web build to upload the file directly.',
-                  )
-                }
-              >
-                <Text style={styles.secondaryButtonText}>How to import</Text>
-              </Pressable>
-            </View>
-          </View>
-          <Text style={styles.importMessage}>{importMessage}</Text>
-          <View style={styles.importList}>
-            {state.imports.length ? (
-              state.imports.slice(0, 6).map((record) => (
-                <View key={record.id} style={styles.importRow}>
-                  <View style={styles.importCopy}>
-                    <Text style={styles.importFile}>{record.fileName}</Text>
-                    <Text style={styles.importMeta}>
-                      {record.format.toUpperCase()} | {record.rows} rows | {record.note}
-                    </Text>
-                  </View>
-                  <Text style={styles.importStatus}>{record.format}</Text>
-                </View>
-              ))
-            ) : (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyTitle}>No files imported yet</Text>
-                <Text style={styles.emptyBody}>
-                  Start with a Wells Fargo PDF or a spreadsheet export. The importer will map rows
-                  into the selected account.
-                </Text>
-              </View>
-            )}
-          </View>
-        </FinanceCard>
+        <ImportHubSection
+          styles={styles}
+          importing={importing}
+          importMessage={importMessage}
+          pastedStatement={pastedStatement}
+          onPastedStatementChange={setPastedStatement}
+          onUploadStatements={importStatementFiles}
+          onResetDemo={resetWorkspace}
+          onExportCsv={exportCsv}
+          onExportBackup={exportBackup}
+          onImportBackupFileSelected={(e) => importBackupFromFileList(e.target.files)}
+          onImportPastedText={importPastedStatement}
+          onImportTip={() =>
+            setImportMessage(
+              'Tip: if you only have a PDF, copy the statement text or use the web build to upload the file directly.',
+            )
+          }
+          imports={state.imports}
+          hasTransactions={state.transactions.length > 0}
+        />
 
         <FinanceCard title="Quick add" eyebrow="Manual entry" tone="warning">
           <Text style={styles.bodyText}>
@@ -1207,44 +1189,6 @@ export default function FinanceApp() {
       </ScrollView>
     </SafeAreaView>
   );
-}
-
-async function assetToFile(asset: DocumentPicker.DocumentPickerAsset) {
-  const typedAsset = asset as DocumentPicker.DocumentPickerAsset & { file?: File };
-
-  if (typedAsset.file) {
-    return typedAsset.file;
-  }
-
-  const response = await fetch(asset.uri);
-  const blob = await response.blob();
-
-  return new File([blob], asset.name ?? 'statement', {
-    type: asset.mimeType ?? blob.type ?? 'application/octet-stream',
-  });
-}
-
-function formatCurrency(amount: number) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 2,
-  }).format(amount);
-}
-
-function formatIsoDate(date = new Date()) {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, '0');
-  const day = `${date.getDate()}`.padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function getErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return 'Unknown error';
 }
 
 const styles = StyleSheet.create({

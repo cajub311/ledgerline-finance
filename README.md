@@ -7,7 +7,8 @@ It is designed around a statement inbox first:
 - Import Wells Fargo PDFs, CSV exports, and spreadsheet files on web.
 - Paste statement text on any device as a fallback.
 - Review transactions, recategorize them, and mark them reviewed.
-- Keep the state serializable with AsyncStorage so the ledger survives app restarts.
+- Keep the state serializable with AsyncStorage so the ledger survives app restarts (saves are debounced so typing does not write on every keystroke).
+- On web, **Export backup** downloads the full ledger as JSON; **Import backup** restores it (useful for moving between browsers or recovering from a bad import).
 
 ## Requirements
 
@@ -46,7 +47,7 @@ The repo is configured for static hosting with `vercel.json`:
 - **Output:** `dist/`
 - **SPA routing:** all routes fall back to `index.html`; hashed assets under `/_expo/static/` are cached with long TTLs
 
-Connect the Git repo in the Vercel dashboard (framework preset: **Other** or leave default; no Next.js). Node 20+ is enforced via `engines` and `.nvmrc`.
+Connect the Git repo in the Vercel dashboard (framework preset: **Other** or leave default; no Next.js). Node 20+ is enforced via `engines` and `.nvmrc`. In GitHub repository settings, consider **branch protection** on `main` requiring the CI workflow to pass before merge.
 
 CLI deploy:
 
@@ -57,6 +58,8 @@ vercel deploy -y --no-wait
 ## Main files
 
 - `src/FinanceApp.tsx` - finance workspace UI
+- `src/components/finance/ImportHubSection.tsx` - import hub (statements, backup, paste)
+- `src/finance/backup.ts` - JSON backup serialize/parse
 - `public/index.html` - web template (includes `<link rel="manifest">`; do not use a `src/app` folder here — Expo treats it as Expo Router and would change the bundle)
 - `src/finance/ledger.ts` - state transitions, summaries, and import application
 - `src/finance/import.shared.ts` - CSV and statement-text parsing

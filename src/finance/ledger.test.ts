@@ -6,8 +6,10 @@ import {
   addManualTransaction,
   applyImportedBatch,
   createFinanceState,
+  getBudgetStatus,
   getFinanceSummary,
   rotateTransactionCategory,
+  setBudget,
 } from './ledger';
 
 test('summary reflects the seeded ledger', () => {
@@ -57,4 +59,14 @@ test('rotating a category advances to the next preset', () => {
 
   assert.ok(updated);
   assert.notEqual(updated?.category, 'Groceries');
+});
+
+test('setBudget adds a category limit visible in budget status', () => {
+  const state = setBudget(createFinanceState(), 'TestCat', 100);
+  const now = new Date();
+  const statuses = getBudgetStatus(state, now.getFullYear(), now.getMonth() + 1);
+  const row = statuses.find((s) => s.category === 'TestCat');
+
+  assert.ok(row);
+  assert.equal(row?.limit, 100);
 });
