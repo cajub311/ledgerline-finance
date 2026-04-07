@@ -16,12 +16,67 @@
       /* These styles disable body scrolling if you are using <ScrollView> */
       body {
         overflow: hidden;
+        margin: 0;
+        background: #071218;
       }
-      /* These styles make the root element full-height */
+      /* The root element for your Expo app — must paint above the boot overlay */
       #root {
         display: flex;
         height: 100%;
         flex: 1;
+        position: relative;
+        z-index: 1;
+      }
+      /* Visible until React paints — sits under #root once the app mounts */
+      #ledgerline-boot {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 12px;
+        background: #071218;
+        color: #eff7f4;
+        font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+        padding: 24px;
+        text-align: center;
+      }
+      #ledgerline-boot p {
+        margin: 0;
+        font-size: 15px;
+        color: #b9ccd0;
+        max-width: 22rem;
+        line-height: 1.45;
+      }
+      #ledgerline-boot .spinner {
+        width: 36px;
+        height: 36px;
+        border: 3px solid #27444f;
+        border-top-color: #d4e37d;
+        border-radius: 50%;
+        animation: ledgerline-spin 0.85s linear infinite;
+      }
+      @keyframes ledgerline-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      #ledgerline-boot.error .spinner {
+        display: none;
+      }
+      #ledgerline-boot.error h1 {
+        color: #d97e68;
+        font-size: 18px;
+      }
+      #ledgerline-boot.error pre {
+        text-align: left;
+        font-size: 12px;
+        color: #94bdc4;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-width: 100%;
       }
     </style>
   </head>
@@ -31,7 +86,55 @@
     <noscript>
       You need to enable JavaScript to run this app.
     </noscript>
+    <div id="ledgerline-boot" aria-live="polite">
+      <div class="spinner" aria-hidden="true"></div>
+      <strong style="font-size: 17px">Ledgerline Finance</strong>
+      <p>Loading…</p>
+    </div>
     <!-- The root element for your Expo app. -->
     <div id="root"></div>
+    <script>
+      (function () {
+        function showError(title, detail) {
+          var el = document.getElementById('ledgerline-boot');
+          if (!el) return;
+          el.className = 'error';
+          el.innerHTML =
+            '<h1>' +
+            (title || 'Something went wrong') +
+            '</h1><p>If this persists, try another browser or disable strict tracking protection for this site.</p><pre>' +
+            (detail || '') +
+            '</pre>';
+          el.style.zIndex = '9999';
+        }
+        window.addEventListener('error', function (ev) {
+          var msg = ev.message || 'Error';
+          if (ev.filename) msg += '\\n' + ev.filename + ':' + (ev.lineno || 0);
+          showError('JavaScript error', msg);
+        });
+        window.addEventListener('unhandledrejection', function (ev) {
+          var r = ev.reason;
+          var detail = r && r.stack ? String(r.stack) : String(r);
+          showError('Unhandled promise rejection', detail);
+        });
+        window.__ledgerlineRemoveBoot = function () {
+          var b = document.getElementById('ledgerline-boot');
+          if (b && b.parentNode) b.parentNode.removeChild(b);
+        };
+        setTimeout(function () {
+          var root = document.getElementById('root');
+          if (
+            document.getElementById('ledgerline-boot') &&
+            root &&
+            root.childElementCount === 0
+          ) {
+            showError(
+              'App is taking too long',
+              'The script may be blocked or failed. Check the browser console, or try disabling shields / ad blockers for this domain.'
+            );
+          }
+        }, 12000);
+      })();
+    </script>
   </body>
 </html>

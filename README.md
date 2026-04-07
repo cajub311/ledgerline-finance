@@ -47,7 +47,7 @@ The repo is configured for static hosting with `vercel.json`:
 - **Output:** `dist/`
 - **Routing:** this build is a single `index.html` plus assets under `/_expo/static/`. Vercel serves those files directly; **no catch‑all rewrite** is needed (a broad rewrite can accidentally serve `index.html` for `.js` requests and break the app).
 
-Connect the Git repo in the Vercel dashboard (framework preset: **Other** or leave default; no Next.js). Node 20+ is enforced via `engines` and `.nvmrc`. In GitHub repository settings, consider **branch protection** on `main` requiring the CI workflow to pass before merge.
+Connect the Git repo in the Vercel dashboard (framework preset: **Other** or leave default; no Next.js). **Root directory** must be the repository root (where `vercel.json` and `package.json` live). Node 20+ is enforced via `engines` and `.nvmrc`. In GitHub repository settings, consider **branch protection** on `main` requiring the CI workflow to pass before merge.
 
 CLI deploy:
 
