@@ -35,6 +35,22 @@ export interface ImportRecord {
   note: string;
 }
 
+export interface Budget {
+  id: string;
+  category: string;
+  monthlyLimit: number;
+  createdAt: string;
+}
+
+export interface FinancialGoal {
+  id: string;
+  name: string;
+  targetAmount: number;
+  currentAmount: number;
+  targetDate: string;
+  createdAt: string;
+}
+
 export interface FinanceState {
   version: 1;
   householdName: string;
@@ -42,6 +58,8 @@ export interface FinanceState {
   accounts: FinanceAccount[];
   transactions: FinanceTransaction[];
   imports: ImportRecord[];
+  budgets: Budget[];
+  goals: FinancialGoal[];
 }
 
 export interface ManualTransactionDraft {
@@ -77,4 +95,47 @@ export interface FinanceSummary {
   unreviewedCount: number;
   importedRows: number;
   importedFiles: number;
+}
+
+export interface CategoryBreakdownItem {
+  category: string;
+  total: number;
+  pct: number;
+}
+
+export interface MonthlyTrendItem {
+  label: string;
+  monthKey: string;
+  income: number;
+  spend: number;
+}
+
+export interface TopMerchantItem {
+  payee: string;
+  total: number;
+  count: number;
+}
+
+export interface DetectedSubscription {
+  payee: string;
+  amount: number;
+  frequency: 'weekly' | 'monthly' | 'annual';
+  lastCharged: string;
+  annualCost: number;
+  occurrences: number;
+}
+
+export interface BudgetStatus {
+  category: string;
+  limit: number;
+  spent: number;
+  pct: number;
+  status: 'ok' | 'warning' | 'over';
+}
+
+export interface GoalStats {
+  pct: number;
+  remaining: number;
+  daysLeft: number;
+  monthlyRequired: number;
 }

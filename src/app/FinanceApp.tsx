@@ -14,21 +14,35 @@ import {
 } from 'react-native';
 
 import { FinanceCard } from '../components/finance/FinanceCard';
+import { InsightBadge } from '../components/finance/InsightBadge';
+import { SpendingBar } from '../components/finance/SpendingBar';
 import { SummaryTile } from '../components/finance/SummaryTile';
 import { TransactionRow } from '../components/finance/TransactionRow';
 import {
+  addGoal,
   applyImportedBatch,
   addManualTransaction,
   createFinanceState,
+  detectSubscriptions,
+  generateInsights,
   getAccountsWithBalances,
   getBudgetPills,
+  getBudgetStatus,
+  getCategoryBreakdown,
   getCategoryOptions,
   getFinanceSummary,
+  getGoalStats,
   getLatestTransactions,
+  getMonthlyTrend,
+  getTopMerchants,
   hasUnreviewedTransactions,
   rehydrateFinanceState,
+  removeGoal,
   rotateTransactionCategory,
+  setBudget,
+  removeBudget,
   toggleTransactionReview,
+  updateGoalProgress,
   updateTransactionCategory,
   type FinanceState,
 } from '../finance';
@@ -66,6 +80,25 @@ export default function FinanceApp() {
   const [manualNotes, setManualNotes] = useState('');
   const [importMessage, setImportMessage] = useState('Ready to import Wells Fargo statements.');
   const [importing, setImporting] = useState(false);
+
+  // Analytics state
+  const [analyticsCategoryFilter, setAnalyticsCategoryFilter] = useState<string | null>(null);
+
+  // Budget UI state
+  const [budgetEditCategory, setBudgetEditCategory] = useState<string | null>(null);
+  const [budgetEditValue, setBudgetEditValue] = useState('');
+  const [newBudgetCategory, setNewBudgetCategory] = useState('Groceries');
+  const [newBudgetLimit, setNewBudgetLimit] = useState('');
+  const [showAddBudget, setShowAddBudget] = useState(false);
+
+  // Goals UI state
+  const [showAddGoal, setShowAddGoal] = useState(false);
+  const [goalName, setGoalName] = useState('');
+  const [goalTarget, setGoalTarget] = useState('');
+  const [goalCurrent, setGoalCurrent] = useState('');
+  const [goalDate, setGoalDate] = useState('');
+  const [goalEditId, setGoalEditId] = useState<string | null>(null);
+  const [goalEditValue, setGoalEditValue] = useState('');
 
   useEffect(() => {
     let mounted = true;
@@ -105,6 +138,37 @@ export default function FinanceApp() {
   const budgetPills = useMemo(() => getBudgetPills(state), [state]);
   const categoryOptions = useMemo(() => getCategoryOptions(), []);
 
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+
+  const categoryBreakdown = useMemo(
+    () => getCategoryBreakdown(state.transactions, currentYear, currentMonth),
+    [state.transactions, currentYear, currentMonth],
+  );
+  const monthlyTrend = useMemo(
+    () => getMonthlyTrend(state.transactions, 6),
+    [state.transactions],
+  );
+  const topMerchants = useMemo(
+    () => getTopMerchants(state.transactions, currentYear, currentMonth, 5),
+    [state.transactions, currentYear, currentMonth],
+  );
+  const detectedSubscriptions = useMemo(
+    () => detectSubscriptions(state.transactions),
+    [state.transactions],
+  );
+  const insights = useMemo(() => generateInsights(state), [state]);
+  const budgetStatuses = useMemo(
+    () => getBudgetStatus(state, currentYear, currentMonth),
+    [state, currentYear, currentMonth],
+  );
+
+  const maxMonthlySpend = useMemo(
+    () => Math.max(...monthlyTrend.map((m) => m.spend), 1),
+    [monthlyTrend],
+  );
+
   const selectedAccount =
     accounts.find((account) => account.id === selectedAccountId) ?? accounts[0] ?? null;
 
@@ -116,6 +180,9 @@ export default function FinanceApp() {
     return state.transactions
       .filter((transaction) => transaction.accountId === selectedAccount.id)
       .filter((transaction) => {
+        if (analyticsCategoryFilter && transaction.category !== analyticsCategoryFilter) {
+          return false;
+        }
         const query = searchQuery.trim().toLowerCase();
 
         if (!query) {
@@ -128,7 +195,7 @@ export default function FinanceApp() {
           .includes(query);
       })
       .sort((left, right) => right.date.localeCompare(left.date));
-  }, [searchQuery, selectedAccount, state.transactions]);
+  }, [analyticsCategoryFilter, searchQuery, selectedAccount, state.transactions]);
 
   const selectedTransaction =
     accountTransactions.find((transaction) => transaction.id === selectedTransactionId) ??
@@ -351,6 +418,396 @@ export default function FinanceApp() {
           <SummaryTile label="Imports" value={`${summary.importedFiles}`} detail="PDF, CSV, and spreadsheet files" />
         </View>
 
+        {/* ── Spending Insights ─────────────────────────────────────── */}
+        {insights.length > 0 && (
+          <FinanceCard title="Spending insights" eyebrow="Smart analysis">
+            {insights.map((insight, i) => (
+              <InsightBadge key={i} text={insight} index={i} />
+            ))}
+          </FinanceCard>
+        )}
+
+        {/* ── Spending Analytics ────────────────────────────────────── */}
+        <FinanceCard title="Spending analytics" eyebrow="This month">
+          {categoryBreakdown.length > 0 ? (
+            <View style={styles.analyticsSection}>
+              <Text style={styles.analyticsSectionTitle}>Category breakdown</Text>
+              {analyticsCategoryFilter ? (
+                <Pressable
+                  style={styles.filterChip}
+                  onPress={() => setAnalyticsCategoryFilter(null)}
+                >
+                  <Text style={styles.filterChipText}>
+                    Filtered: {analyticsCategoryFilter} ×
+                  </Text>
+                </Pressable>
+              ) : null}
+              {categoryBreakdown.map((item) => (
+                <Pressable
+                  key={item.category}
+                  onPress={() =>
+                    setAnalyticsCategoryFilter(
+                      analyticsCategoryFilter === item.category ? null : item.category,
+                    )
+                  }
+                >
+                  <SpendingBar
+                    category={item.category}
+                    amount={item.total}
+                    pct={item.pct}
+                  />
+                </Pressable>
+              ))}
+            </View>
+          ) : (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>No spending data yet</Text>
+              <Text style={styles.emptyBody}>Import a statement to see your spending breakdown.</Text>
+            </View>
+          )}
+
+          {topMerchants.length > 0 && (
+            <View style={styles.analyticsSection}>
+              <Text style={styles.analyticsSectionTitle}>Top merchants this month</Text>
+              {topMerchants.map((merchant, i) => (
+                <View key={merchant.payee} style={styles.merchantRow}>
+                  <Text style={styles.merchantRank}>#{i + 1}</Text>
+                  <Text style={styles.merchantName} numberOfLines={1}>{merchant.payee}</Text>
+                  <Text style={styles.merchantAmount}>${merchant.total.toFixed(0)}</Text>
+                  <Text style={styles.merchantCount}>{merchant.count}×</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {monthlyTrend.length > 0 && (
+            <View style={styles.analyticsSection}>
+              <Text style={styles.analyticsSectionTitle}>6-month spending trend</Text>
+              <View style={styles.trendChart}>
+                {monthlyTrend.map((m) => {
+                  const barHeightPct = maxMonthlySpend > 0 ? m.spend / maxMonthlySpend : 0;
+                  const barHeight = Math.max(4, Math.round(barHeightPct * 80));
+                  return (
+                    <View key={m.monthKey} style={styles.trendColumn}>
+                      <Text style={styles.trendAmount}>${(m.spend / 1000).toFixed(1)}k</Text>
+                      <View style={styles.trendBarWrap}>
+                        <View style={[styles.trendBar, { height: barHeight }]} />
+                      </View>
+                      <Text style={styles.trendLabel}>{m.label}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+        </FinanceCard>
+
+        {/* ── Subscriptions ─────────────────────────────────────────── */}
+        <FinanceCard title="Subscriptions" eyebrow="Recurring charges">
+          {detectedSubscriptions.length > 0 ? (
+            <View style={styles.subStack}>
+              {detectedSubscriptions.map((sub) => (
+                <View key={sub.payee} style={styles.subRow}>
+                  <View style={styles.subCopy}>
+                    <Text style={styles.subName}>{sub.payee}</Text>
+                    <Text style={styles.subMeta}>
+                      {sub.frequency} · last {sub.lastCharged} · {sub.occurrences} charges found
+                    </Text>
+                  </View>
+                  <View style={styles.subAmounts}>
+                    <Text style={styles.subMonthly}>${sub.amount.toFixed(2)}/mo</Text>
+                    <Text style={styles.subAnnual}>${sub.annualCost.toFixed(0)}/yr</Text>
+                  </View>
+                </View>
+              ))}
+              <View style={styles.subTotalRow}>
+                <Text style={styles.subTotalLabel}>
+                  {detectedSubscriptions.length} subscriptions detected
+                </Text>
+                <Text style={styles.subTotalValue}>
+                  ${detectedSubscriptions
+                    .filter((s) => s.frequency === 'monthly')
+                    .reduce((sum, s) => sum + s.amount, 0)
+                    .toFixed(2)}
+                  /mo
+                </Text>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>No recurring charges detected</Text>
+              <Text style={styles.emptyBody}>
+                Import a few months of statements and recurring charges will appear here automatically.
+              </Text>
+            </View>
+          )}
+        </FinanceCard>
+
+        {/* ── Monthly Budgets ───────────────────────────────────────── */}
+        <FinanceCard title="Monthly budgets" eyebrow="Spending limits">
+          {budgetStatuses.length > 0 ? (
+            <View style={styles.budgetStack}>
+              {budgetStatuses.map((bs) => {
+                const barColor =
+                  bs.status === 'over'
+                    ? palette.danger
+                    : bs.status === 'warning'
+                      ? palette.warning
+                      : palette.positive;
+                const barWidth = `${Math.min(100, Math.round(bs.pct * 100))}%` as `${number}%`;
+                const isEditing = budgetEditCategory === bs.category;
+
+                return (
+                  <View key={bs.category} style={styles.budgetRow}>
+                    <View style={styles.budgetHeader}>
+                      <Text style={styles.budgetCategory}>{bs.category}</Text>
+                      <View style={styles.budgetHeaderRight}>
+                        <Text style={[styles.budgetStatus, { color: barColor }]}>
+                          ${bs.spent.toFixed(0)} / ${bs.limit.toFixed(0)}
+                        </Text>
+                        <Pressable
+                          onPress={() => {
+                            if (isEditing) {
+                              const val = Number.parseFloat(budgetEditValue);
+                              if (Number.isFinite(val) && val > 0) {
+                                updateState((s) => setBudget(s, bs.category, val));
+                              }
+                              setBudgetEditCategory(null);
+                            } else {
+                              setBudgetEditCategory(bs.category);
+                              setBudgetEditValue(String(bs.limit));
+                            }
+                          }}
+                        >
+                          <Text style={styles.budgetEditBtn}>{isEditing ? 'Save' : 'Edit'}</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => updateState((s) => removeBudget(s, bs.category))}
+                        >
+                          <Text style={styles.budgetRemoveBtn}>×</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                    {isEditing ? (
+                      <TextInput
+                        style={styles.budgetInput}
+                        value={budgetEditValue}
+                        onChangeText={setBudgetEditValue}
+                        keyboardType="decimal-pad"
+                        placeholder="Monthly limit"
+                        placeholderTextColor="#7d9aa0"
+                        autoFocus
+                      />
+                    ) : (
+                      <View style={styles.budgetTrack}>
+                        <View style={[styles.budgetBar, { width: barWidth, backgroundColor: barColor }]} />
+                      </View>
+                    )}
+                    <Text style={styles.budgetPct}>
+                      {Math.round(bs.pct * 100)}% used
+                      {bs.status === 'over' ? ' — Over budget!' : bs.status === 'warning' ? ' — Almost there' : ''}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
+
+          {showAddBudget ? (
+            <View style={styles.addBudgetForm}>
+              <Text style={styles.addBudgetTitle}>Add budget</Text>
+              <View style={styles.categoryWrap}>
+                {categoryOptions
+                  .filter((c) => c !== 'Income' && c !== 'Transfer')
+                  .map((cat) => {
+                    const active = newBudgetCategory === cat;
+                    return (
+                      <Pressable
+                        key={`budget-cat-${cat}`}
+                        style={[styles.categoryChip, active && styles.categoryChipActive]}
+                        onPress={() => setNewBudgetCategory(cat)}
+                      >
+                        <Text style={[styles.categoryChipText, active && styles.categoryChipTextActive]}>
+                          {cat}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+              </View>
+              <TextInput
+                style={styles.manualInput}
+                placeholder="Monthly limit (e.g. 300)"
+                placeholderTextColor="#7d9aa0"
+                value={newBudgetLimit}
+                onChangeText={setNewBudgetLimit}
+                keyboardType="decimal-pad"
+              />
+              <View style={styles.importButtonRow}>
+                <Pressable
+                  style={styles.primaryButton}
+                  onPress={() => {
+                    const val = Number.parseFloat(newBudgetLimit);
+                    if (Number.isFinite(val) && val > 0) {
+                      updateState((s) => setBudget(s, newBudgetCategory, val));
+                      setNewBudgetLimit('');
+                      setShowAddBudget(false);
+                    }
+                  }}
+                >
+                  <Text style={styles.primaryButtonText}>Save budget</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.secondaryButton}
+                  onPress={() => setShowAddBudget(false)}
+                >
+                  <Text style={styles.secondaryButtonText}>Cancel</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            <Pressable style={styles.secondaryButton} onPress={() => setShowAddBudget(true)}>
+              <Text style={styles.secondaryButtonText}>+ Add budget</Text>
+            </Pressable>
+          )}
+        </FinanceCard>
+
+        {/* ── Financial Goals ───────────────────────────────────────── */}
+        <FinanceCard title="Financial goals" eyebrow="Savings targets">
+          {state.goals.length > 0 ? (
+            <View style={styles.goalsStack}>
+              {state.goals.map((goal) => {
+                const stats = getGoalStats(goal);
+                const barWidth = `${Math.min(100, Math.round(stats.pct * 100))}%` as `${number}%`;
+                const isEditing = goalEditId === goal.id;
+
+                return (
+                  <View key={goal.id} style={styles.goalCard}>
+                    <View style={styles.goalHeader}>
+                      <Text style={styles.goalName}>{goal.name}</Text>
+                      <View style={styles.goalHeaderRight}>
+                        <Pressable
+                          onPress={() => {
+                            if (isEditing) {
+                              const val = Number.parseFloat(goalEditValue);
+                              if (Number.isFinite(val) && val >= 0) {
+                                updateState((s) => updateGoalProgress(s, goal.id, val));
+                              }
+                              setGoalEditId(null);
+                            } else {
+                              setGoalEditId(goal.id);
+                              setGoalEditValue(String(goal.currentAmount));
+                            }
+                          }}
+                        >
+                          <Text style={styles.goalEditBtn}>{isEditing ? 'Save' : 'Update'}</Text>
+                        </Pressable>
+                        <Pressable onPress={() => updateState((s) => removeGoal(s, goal.id))}>
+                          <Text style={styles.goalRemoveBtn}>×</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                    <View style={styles.goalAmounts}>
+                      <Text style={styles.goalProgress}>
+                        ${goal.currentAmount.toLocaleString()} of ${goal.targetAmount.toLocaleString()}
+                      </Text>
+                      <Text style={styles.goalPct}>{Math.round(stats.pct * 100)}%</Text>
+                    </View>
+                    {isEditing ? (
+                      <TextInput
+                        style={styles.budgetInput}
+                        value={goalEditValue}
+                        onChangeText={setGoalEditValue}
+                        keyboardType="decimal-pad"
+                        placeholder="Current saved amount"
+                        placeholderTextColor="#7d9aa0"
+                        autoFocus
+                      />
+                    ) : (
+                      <View style={styles.goalTrack}>
+                        <View style={[styles.goalBar, { width: barWidth }]} />
+                      </View>
+                    )}
+                    <Text style={styles.goalMeta}>
+                      {stats.daysLeft} days left · save ${stats.monthlyRequired.toFixed(0)}/mo ·
+                      target {goal.targetDate}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
+
+          {showAddGoal ? (
+            <View style={styles.addBudgetForm}>
+              <Text style={styles.addBudgetTitle}>New goal</Text>
+              <TextInput
+                style={styles.manualInput}
+                placeholder="Goal name (e.g. Emergency Fund)"
+                placeholderTextColor="#7d9aa0"
+                value={goalName}
+                onChangeText={setGoalName}
+              />
+              <View style={styles.manualRow}>
+                <TextInput
+                  style={[styles.manualInput, styles.manualInputHalf]}
+                  placeholder="Target amount"
+                  placeholderTextColor="#7d9aa0"
+                  value={goalTarget}
+                  onChangeText={setGoalTarget}
+                  keyboardType="decimal-pad"
+                />
+                <TextInput
+                  style={[styles.manualInput, styles.manualInputHalf]}
+                  placeholder="Already saved"
+                  placeholderTextColor="#7d9aa0"
+                  value={goalCurrent}
+                  onChangeText={setGoalCurrent}
+                  keyboardType="decimal-pad"
+                />
+              </View>
+              <TextInput
+                style={styles.manualInput}
+                placeholder="Target date (YYYY-MM-DD)"
+                placeholderTextColor="#7d9aa0"
+                value={goalDate}
+                onChangeText={setGoalDate}
+              />
+              <View style={styles.importButtonRow}>
+                <Pressable
+                  style={styles.primaryButton}
+                  onPress={() => {
+                    const target = Number.parseFloat(goalTarget);
+                    const current = Number.parseFloat(goalCurrent) || 0;
+                    if (!goalName.trim() || !Number.isFinite(target) || !goalDate.trim()) return;
+                    updateState((s) =>
+                      addGoal(s, {
+                        name: goalName.trim(),
+                        targetAmount: target,
+                        currentAmount: current,
+                        targetDate: goalDate.trim(),
+                      }),
+                    );
+                    setGoalName('');
+                    setGoalTarget('');
+                    setGoalCurrent('');
+                    setGoalDate('');
+                    setShowAddGoal(false);
+                  }}
+                >
+                  <Text style={styles.primaryButtonText}>Save goal</Text>
+                </Pressable>
+                <Pressable style={styles.secondaryButton} onPress={() => setShowAddGoal(false)}>
+                  <Text style={styles.secondaryButtonText}>Cancel</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            <Pressable style={styles.secondaryButton} onPress={() => setShowAddGoal(true)}>
+              <Text style={styles.secondaryButtonText}>+ Add goal</Text>
+            </Pressable>
+          )}
+        </FinanceCard>
+
         <FinanceCard title="Import hub" eyebrow="Statements" tone="accent">
           <Text style={styles.bodyText}>
             Upload Wells Fargo statements as PDF, CSV, XLS, or XLSX on web. Paste statement text on
@@ -533,6 +990,16 @@ export default function FinanceApp() {
             Transactions stay reviewable: change a category, mark something reviewed, and keep the
             ledger moving without leaving the workspace.
           </Text>
+          {analyticsCategoryFilter ? (
+            <Pressable
+              style={styles.filterChip}
+              onPress={() => setAnalyticsCategoryFilter(null)}
+            >
+              <Text style={styles.filterChipText}>
+                Category: {analyticsCategoryFilter} — tap to clear ×
+              </Text>
+            </Pressable>
+          ) : null}
           <TextInput
             style={styles.searchInput}
             placeholder="Search transactions by merchant, category, or note"
@@ -1079,6 +1546,307 @@ const styles = StyleSheet.create({
     color: palette.warning,
     fontSize: 12,
     lineHeight: 17,
+  },
+
+  // ── Analytics ──────────────────────────────────────────────────────────────
+  analyticsSection: {
+    gap: 8,
+  },
+  analyticsSectionTitle: {
+    color: palette.accentSoft,
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.9,
+    marginBottom: 2,
+  },
+  filterChip: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: palette.accent,
+    backgroundColor: '#1a2d1d',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginBottom: 4,
+  },
+  filterChipText: {
+    color: palette.accent,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  merchantRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 5,
+    borderTopWidth: 1,
+    borderTopColor: '#1e3840',
+  },
+  merchantRank: {
+    color: palette.accentSoft,
+    fontSize: 11,
+    fontWeight: '800',
+    width: 22,
+    flexShrink: 0,
+  },
+  merchantName: {
+    flex: 1,
+    color: palette.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  merchantAmount: {
+    color: palette.text,
+    fontSize: 13,
+    fontWeight: '800',
+    flexShrink: 0,
+  },
+  merchantCount: {
+    color: palette.muted,
+    fontSize: 11,
+    width: 22,
+    textAlign: 'right',
+    flexShrink: 0,
+  },
+  trendChart: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 6,
+    height: 110,
+    paddingTop: 8,
+  },
+  trendColumn: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+  },
+  trendAmount: {
+    color: palette.muted,
+    fontSize: 9,
+    textAlign: 'center',
+  },
+  trendBarWrap: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    width: '100%',
+    alignItems: 'center',
+  },
+  trendBar: {
+    width: '80%',
+    backgroundColor: '#3d7a8a',
+    borderRadius: 4,
+    minHeight: 4,
+  },
+  trendLabel: {
+    color: palette.muted,
+    fontSize: 9,
+    textAlign: 'center',
+  },
+
+  // ── Subscriptions ──────────────────────────────────────────────────────────
+  subStack: {
+    gap: 0,
+  },
+  subRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#1e3840',
+  },
+  subCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  subName: {
+    color: palette.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  subMeta: {
+    color: palette.muted,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  subAmounts: {
+    alignItems: 'flex-end',
+    gap: 2,
+    flexShrink: 0,
+  },
+  subMonthly: {
+    color: palette.text,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  subAnnual: {
+    color: palette.muted,
+    fontSize: 11,
+  },
+  subTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#355963',
+  },
+  subTotalLabel: {
+    color: palette.accentSoft,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  subTotalValue: {
+    color: palette.accent,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+
+  // ── Budgets ────────────────────────────────────────────────────────────────
+  budgetStack: {
+    gap: 14,
+  },
+  budgetRow: {
+    gap: 6,
+  },
+  budgetHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  budgetHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  budgetCategory: {
+    color: palette.text,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  budgetStatus: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  budgetEditBtn: {
+    color: palette.accentSoft,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  budgetRemoveBtn: {
+    color: palette.danger,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  budgetTrack: {
+    height: 10,
+    backgroundColor: '#1a3540',
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  budgetBar: {
+    height: '100%',
+    borderRadius: 6,
+  },
+  budgetPct: {
+    color: palette.muted,
+    fontSize: 11,
+  },
+  budgetInput: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: palette.borderSoft,
+    backgroundColor: '#0b171c',
+    color: palette.text,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
+  },
+  addBudgetForm: {
+    gap: 10,
+    backgroundColor: '#0d1e26',
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: palette.borderSoft,
+  },
+  addBudgetTitle: {
+    color: palette.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+
+  // ── Goals ──────────────────────────────────────────────────────────────────
+  goalsStack: {
+    gap: 14,
+  },
+  goalCard: {
+    backgroundColor: '#0d1e26',
+    borderRadius: 18,
+    padding: 14,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: palette.borderSoft,
+  },
+  goalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  goalHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  goalName: {
+    color: palette.text,
+    fontSize: 15,
+    fontWeight: '800',
+    flex: 1,
+  },
+  goalEditBtn: {
+    color: palette.accentSoft,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  goalRemoveBtn: {
+    color: palette.danger,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  goalAmounts: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  goalProgress: {
+    color: palette.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  goalPct: {
+    color: palette.accent,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  goalTrack: {
+    height: 12,
+    backgroundColor: '#1a3540',
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  goalBar: {
+    height: '100%',
+    backgroundColor: palette.accent,
+    borderRadius: 6,
+  },
+  goalMeta: {
+    color: palette.muted,
+    fontSize: 11,
+    lineHeight: 15,
   },
 });
 
