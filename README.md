@@ -43,7 +43,7 @@ vercel deploy -y --no-wait
 
 ## Main files
 
-- `src/app/FinanceApp.tsx` - finance workspace UI
+- `src/FinanceApp.tsx` - finance workspace UI
 - `src/finance/ledger.ts` - state transitions, summaries, and import application
 - `src/finance/import.shared.ts` - CSV and statement-text parsing
 - `src/finance/import.web.ts` - web file import and PDF/XLSX parsing

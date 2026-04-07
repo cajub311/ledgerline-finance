@@ -1,1 +1,1 @@
-export { default } from './src/app/FinanceApp';
+export { default } from './src/FinanceApp';

@@ -7,7 +7,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "build:web": "expo export -p web",
+    "build:web": "npx expo export -p web",
     "test": "node --import tsx --test src/finance/import.test.ts src/finance/ledger.test.ts",
     "typecheck": "tsc --noEmit"
   },
