@@ -24,7 +24,12 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "name": "Ledgerline Finance",
+      "shortName": "Ledgerline",
+      "description": "A local-first personal finance workspace. Import statements, track spending, set budgets, and hit your savings goals — all in your browser, no account needed.",
+      "themeColor": "#071218",
+      "backgroundColor": "#071218"
     }
   }
 }
