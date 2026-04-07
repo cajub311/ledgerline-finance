@@ -13,11 +13,11 @@ import {
   View,
 } from 'react-native';
 
-import { FinanceCard } from '../components/finance/FinanceCard';
-import { InsightBadge } from '../components/finance/InsightBadge';
-import { SpendingBar } from '../components/finance/SpendingBar';
-import { SummaryTile } from '../components/finance/SummaryTile';
-import { TransactionRow } from '../components/finance/TransactionRow';
+import { FinanceCard } from './components/finance/FinanceCard';
+import { InsightBadge } from './components/finance/InsightBadge';
+import { SpendingBar } from './components/finance/SpendingBar';
+import { SummaryTile } from './components/finance/SummaryTile';
+import { TransactionRow } from './components/finance/TransactionRow';
 import {
   addGoal,
   applyImportedBatch,
@@ -48,11 +48,11 @@ import {
   updateGoalProgress,
   updateTransactionCategory,
   type FinanceState,
-} from '../finance';
-import { buildTransactionsCsv } from '../finance/export';
-import { parseStatementBlob } from '../finance/import';
-import { parseStatementText } from '../finance/import.shared';
-import { clearFinanceState as clearFinanceStorage, loadFinanceState, saveFinanceState } from '../finance/storage';
+} from './finance';
+import { buildTransactionsCsv } from './finance/export';
+import { parseStatementBlob } from './finance/import';
+import { parseStatementText } from './finance/import.shared';
+import { clearFinanceState as clearFinanceStorage, loadFinanceState, saveFinanceState } from './finance/storage';
 
 const palette = {
   bg: '#071218',

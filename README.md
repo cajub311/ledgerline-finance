@@ -27,6 +27,8 @@ npm run typecheck
 npm test
 ```
 
+On pull requests and pushes to `main`, GitHub Actions runs the same checks plus a production web build (see `.github/workflows/ci.yml`).
+
 ## Web export / production build
 
 ```bash
@@ -54,7 +56,8 @@ vercel deploy -y --no-wait
 
 ## Main files
 
-- `src/app/FinanceApp.tsx` - finance workspace UI
+- `src/FinanceApp.tsx` - finance workspace UI
+- `public/index.html` - web template (includes `<link rel="manifest">`; do not use a `src/app` folder here — Expo treats it as Expo Router and would change the bundle)
 - `src/finance/ledger.ts` - state transitions, summaries, and import application
 - `src/finance/import.shared.ts` - CSV and statement-text parsing
 - `src/finance/import.web.ts` - web file import and PDF/XLSX parsing

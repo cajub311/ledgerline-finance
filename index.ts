@@ -1,6 +1,6 @@
 import { registerRootComponent } from 'expo';
 
-import FinanceApp from './src/app/FinanceApp';
+import FinanceApp from './src/FinanceApp';
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);
 // It also ensures that whether you load the app in Expo Go or in a native build,
