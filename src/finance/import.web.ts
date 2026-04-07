@@ -4,10 +4,7 @@ import type { ParsedStatementBatch } from './types';
 async function readPdfText(arrayBuffer: ArrayBuffer): Promise<string> {
   const pdfjs = await import('pdfjs-dist/build/pdf.mjs');
 
-  pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.min.mjs',
-    import.meta.url,
-  ).toString();
+  pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
   const document = await pdfjs.getDocument({ data: arrayBuffer }).promise;
   const parts: string[] = [];
