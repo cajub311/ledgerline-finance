@@ -49,6 +49,15 @@ The repo is configured for static hosting with `vercel.json`:
 
 Connect the Git repo in the Vercel dashboard (framework preset: **Other** or leave default; no Next.js). **Root directory** must be the repository root (where `vercel.json` and `package.json` live). Node 20+ is enforced via `engines` and `.nvmrc`. In GitHub repository settings, consider **branch protection** on `main` requiring the CI workflow to pass before merge.
 
+### Production URL vs preview URL
+
+Long URLs like `ledgernew-73eg17j77-cajub311s-projects.vercel.app` are **one deployment’s preview**. They do **not** auto-update when you push to `main`. After each push, open the **production** domain from the Vercel project instead, for example:
+
+- **`https://ledgernew.vercel.app`** (project **ledgernew**)
+- **`https://dist-omega-one-79.vercel.app`** (project **dist**)
+
+Both projects can be linked to the same GitHub repo; use **Deployments → Production** in the dashboard to see which commit is live. Pushes to `main` update production, not old preview links.
+
 CLI deploy:
 
 ```bash
