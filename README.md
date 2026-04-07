@@ -45,9 +45,18 @@ The repo is configured for static hosting with `vercel.json`:
 - **Install:** `npm ci` for reproducible builds from `package-lock.json`
 - **Build:** `npm run build` (also exposed as `vercel-build` for frameworks that look for it)
 - **Output:** `dist/`
-- **SPA routing:** paths that are not static files fall back to `index.html`. The rewrite **must not** match `/_expo/static/**` (or JS/CSS requests get HTML and the app shows a blank page). See the negative-lookahead pattern in `vercel.json`.
+- **Routing:** this build is a single `index.html` plus assets under `/_expo/static/`. Vercel serves those files directly; **no catch‑all rewrite** is needed (a broad rewrite can accidentally serve `index.html` for `.js` requests and break the app).
 
-Connect the Git repo in the Vercel dashboard (framework preset: **Other** or leave default; no Next.js). Node 20+ is enforced via `engines` and `.nvmrc`. In GitHub repository settings, consider **branch protection** on `main` requiring the CI workflow to pass before merge.
+Connect the Git repo in the Vercel dashboard (framework preset: **Other** or leave default; no Next.js). **Root directory** must be the repository root (where `vercel.json` and `package.json` live). Node 20+ is enforced via `engines` and `.nvmrc`. In GitHub repository settings, consider **branch protection** on `main` requiring the CI workflow to pass before merge.
+
+### Production URL vs preview URL
+
+Long URLs like `ledgernew-73eg17j77-cajub311s-projects.vercel.app` are **one deployment’s preview**. They do **not** auto-update when you push to `main`. After each push, open the **production** domain from the Vercel project instead, for example:
+
+- **`https://ledgernew.vercel.app`** (project **ledgernew**)
+- **`https://dist-omega-one-79.vercel.app`** (project **dist**)
+
+Both projects can be linked to the same GitHub repo; use **Deployments → Production** in the dashboard to see which commit is live. Pushes to `main` update production, not old preview links.
 
 CLI deploy:
 
