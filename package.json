@@ -2,12 +2,17 @@
   "name": "ledgerline-finance",
   "version": "1.0.0",
   "main": "index.ts",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "build:web": "expo export -p web",
+    "build": "expo export -p web",
+    "build:web": "npm run build",
+    "vercel-build": "npm run build",
     "test": "node --import tsx --test src/finance/import.test.ts src/finance/ledger.test.ts",
     "typecheck": "tsc --noEmit"
   },

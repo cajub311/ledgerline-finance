@@ -9,6 +9,10 @@ It is designed around a statement inbox first:
 - Review transactions, recategorize them, and mark them reviewed.
 - Keep the state serializable with AsyncStorage so the ledger survives app restarts.
 
+## Requirements
+
+- Node.js 20 or newer (see `engines` in `package.json` and `.nvmrc`)
+
 ## Run locally
 
 ```bash
@@ -23,19 +27,26 @@ npm run typecheck
 npm test
 ```
 
-## Web export
+## Web export / production build
 
 ```bash
-npm run build:web
+npm run build
 ```
 
-The web export lands in `dist/` and is the same output Vercel hosts.
+(`npm run build:web` is an alias.) The static export lands in `dist/` and is what Vercel serves.
 
 ## Vercel
 
-The repo is configured for Vercel preview deployments with `vercel.json`.
+The repo is configured for static hosting with `vercel.json`:
 
-If you want to redeploy from the CLI:
+- **Install:** `npm ci` for reproducible builds from `package-lock.json`
+- **Build:** `npm run build` (also exposed as `vercel-build` for frameworks that look for it)
+- **Output:** `dist/`
+- **SPA routing:** all routes fall back to `index.html`; hashed assets under `/_expo/static/` are cached with long TTLs
+
+Connect the Git repo in the Vercel dashboard (framework preset: **Other** or leave default; no Next.js). Node 20+ is enforced via `engines` and `.nvmrc`.
+
+CLI deploy:
 
 ```bash
 vercel deploy -y --no-wait
