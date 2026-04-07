@@ -45,7 +45,7 @@ The repo is configured for static hosting with `vercel.json`:
 - **Install:** `npm ci` for reproducible builds from `package-lock.json`
 - **Build:** `npm run build` (also exposed as `vercel-build` for frameworks that look for it)
 - **Output:** `dist/`
-- **SPA routing:** all routes fall back to `index.html`; hashed assets under `/_expo/static/` are cached with long TTLs
+- **SPA routing:** paths that are not static files fall back to `index.html`. The rewrite **must not** match `/_expo/static/**` (or JS/CSS requests get HTML and the app shows a blank page). See the negative-lookahead pattern in `vercel.json`.
 
 Connect the Git repo in the Vercel dashboard (framework preset: **Other** or leave default; no Next.js). Node 20+ is enforced via `engines` and `.nvmrc`. In GitHub repository settings, consider **branch protection** on `main` requiring the CI workflow to pass before merge.
 
