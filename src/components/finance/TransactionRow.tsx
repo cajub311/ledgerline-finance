@@ -7,6 +7,7 @@ export function TransactionRow({
   date,
   account,
   category,
+  categoryIcon,
   flagged,
   selected,
   onPress,
@@ -17,6 +18,7 @@ export function TransactionRow({
   date: string;
   account: string;
   category: string;
+  categoryIcon?: string;
   flagged?: boolean;
   selected?: boolean;
   onPress?: () => void;
@@ -26,14 +28,17 @@ export function TransactionRow({
       style={[styles.row, selected && styles.rowSelected, flagged && styles.rowFlagged]}
       onPress={onPress}
     >
+      <View style={styles.iconWrap}>
+        <Text style={styles.icon}>{categoryIcon ?? '📋'}</Text>
+      </View>
       <View style={styles.copy}>
-        <Text style={styles.merchant}>{merchant}</Text>
+        <Text style={styles.merchant} numberOfLines={1}>{merchant}</Text>
         <Text style={styles.meta}>
-          {date}  {category}  {account}
+          {date} · {category} · {account}
         </Text>
       </View>
       <View style={styles.amountWrap}>
-        {flagged ? <Text style={styles.flag}>Needs review</Text> : null}
+        {flagged ? <Text style={styles.flag}>Review</Text> : null}
         <Text
           style={[
             styles.amount,
@@ -51,10 +56,9 @@ export function TransactionRow({
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
+    gap: 10,
+    paddingVertical: 10,
     borderTopWidth: 1,
     borderTopColor: '#1f3740',
   },
@@ -67,33 +71,47 @@ const styles = StyleSheet.create({
   rowFlagged: {
     borderTopColor: '#6d5540',
   },
+  iconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: '#0e2028',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  icon: {
+    fontSize: 16,
+  },
   copy: {
     flex: 1,
-    gap: 4,
+    gap: 3,
   },
   merchant: {
     color: '#eff4f2',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
   },
   meta: {
     color: '#9fb8be',
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 11,
+    lineHeight: 15,
   },
   amountWrap: {
     alignItems: 'flex-end',
-    gap: 4,
+    gap: 3,
+    flexShrink: 0,
   },
   flag: {
     color: '#d9b08c',
-    fontSize: 11,
-    fontWeight: '700',
+    fontSize: 10,
+    fontWeight: '800',
     textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   amount: {
     color: '#eff4f2',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
   },
   amountPositive: {

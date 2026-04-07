@@ -26,14 +26,17 @@ import {
   detectSubscriptions,
   generateInsights,
   getAccountsWithBalances,
+  getBudgetHealthScore,
   getBudgetPills,
   getBudgetStatus,
   getCategoryBreakdown,
+  getCategoryIcon,
   getCategoryOptions,
   getFinanceSummary,
   getGoalStats,
   getLatestTransactions,
   getMonthlyTrend,
+  getSavingsRate,
   getTopMerchants,
   hasUnreviewedTransactions,
   rehydrateFinanceState,
@@ -84,6 +87,7 @@ export default function FinanceApp() {
 
   // Analytics state
   const [analyticsCategoryFilter, setAnalyticsCategoryFilter] = useState<string | null>(null);
+  const [analyticsMonthOffset, setAnalyticsMonthOffset] = useState(0); // 0 = current, -1 = prev, etc.
 
   // Budget UI state
   const [budgetEditCategory, setBudgetEditCategory] = useState<string | null>(null);
@@ -143,18 +147,35 @@ export default function FinanceApp() {
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth() + 1;
 
+  // Analytics month (can browse backwards with offset)
+  const analyticsDate = useMemo(() => {
+    const d = new Date(now.getFullYear(), now.getMonth() + analyticsMonthOffset, 1);
+    return { year: d.getFullYear(), month: d.getMonth() + 1 };
+  }, [analyticsMonthOffset, now.getFullYear(), now.getMonth()]);
+
+  const analyticsMonthLabel = useMemo(() => {
+    const d = new Date(analyticsDate.year, analyticsDate.month - 1, 1);
+    return d.toLocaleString('default', { month: 'long', year: 'numeric' });
+  }, [analyticsDate]);
+
+  const dayOfMonth = now.getDate();
+  const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+  const isCurrentMonth = analyticsMonthOffset === 0;
+
   const categoryBreakdown = useMemo(
-    () => getCategoryBreakdown(state.transactions, currentYear, currentMonth),
-    [state.transactions, currentYear, currentMonth],
+    () => getCategoryBreakdown(state.transactions, analyticsDate.year, analyticsDate.month),
+    [state.transactions, analyticsDate],
   );
   const monthlyTrend = useMemo(
     () => getMonthlyTrend(state.transactions, 6),
     [state.transactions],
   );
   const topMerchants = useMemo(
-    () => getTopMerchants(state.transactions, currentYear, currentMonth, 5),
-    [state.transactions, currentYear, currentMonth],
+    () => getTopMerchants(state.transactions, analyticsDate.year, analyticsDate.month, 5),
+    [state.transactions, analyticsDate],
   );
+  const savingsRate = useMemo(() => getSavingsRate(state), [state]);
+  const budgetHealthScore = useMemo(() => getBudgetHealthScore(state), [state]);
   const detectedSubscriptions = useMemo(
     () => detectSubscriptions(state.transactions),
     [state.transactions],
@@ -402,8 +423,8 @@ export default function FinanceApp() {
             <Text style={styles.kicker}>{state.householdName}</Text>
             <Text style={styles.title}>Ledgerline Finance</Text>
             <Text style={styles.subtitle}>
-              A local-first workspace for Wells Fargo PDFs, spreadsheets, and quick review of
-              imported transactions.
+              Your personal finance command center — import statements, track spending habits,
+              set budgets, and hit your savings goals. Everything stays on your device.
             </Text>
             <View style={styles.pillRow}>
               {budgetPills.map((pill) => (
@@ -423,12 +444,22 @@ export default function FinanceApp() {
         </View>
 
         <View style={styles.summaryGrid}>
-          <SummaryTile label="Liquid cash" value={formatCurrency(summary.liquidCash)} detail="Checking, savings, and cash accounts" tone="positive" />
-          <SummaryTile label="Month income" value={formatCurrency(summary.monthIncome)} detail="Income recognized in the current month" tone="positive" />
-          <SummaryTile label="Month spend" value={formatCurrency(summary.monthSpend)} detail="Outflow tracked from imported transactions" tone="alert" />
-          <SummaryTile label="Unreviewed" value={`${summary.unreviewedCount}`} detail="Transactions still needing attention" tone="alert" />
-          <SummaryTile label="Imported rows" value={`${summary.importedRows}`} detail="Rows ingested from statements" />
-          <SummaryTile label="Imports" value={`${summary.importedFiles}`} detail="PDF, CSV, and spreadsheet files" />
+          <SummaryTile label="Liquid cash" value={formatCurrency(summary.liquidCash)} detail="Checking, savings & cash" tone="positive" />
+          <SummaryTile label="Month income" value={formatCurrency(summary.monthIncome)} detail="Income this month" tone="positive" />
+          <SummaryTile label="Month spend" value={formatCurrency(summary.monthSpend)} detail="Expenses this month" tone="alert" />
+          <SummaryTile
+            label="Savings rate"
+            value={savingsRate > 0 ? `${savingsRate}%` : '—'}
+            detail={savingsRate > 0 ? 'Of income kept this month' : 'Import income to calculate'}
+            tone={savingsRate >= 20 ? 'positive' : savingsRate > 0 ? 'neutral' : 'neutral'}
+          />
+          <SummaryTile
+            label="Budget health"
+            value={budgetHealthScore != null ? `${budgetHealthScore}%` : '—'}
+            detail={budgetHealthScore != null ? 'Budgets on track this month' : 'Set budgets below to track'}
+            tone={budgetHealthScore != null && budgetHealthScore >= 70 ? 'positive' : budgetHealthScore != null ? 'alert' : 'neutral'}
+          />
+          <SummaryTile label="Unreviewed" value={`${summary.unreviewedCount}`} detail="Transactions to review" tone={summary.unreviewedCount > 0 ? 'alert' : 'neutral'} />
         </View>
 
         {/* ── Spending Insights ─────────────────────────────────────── */}
@@ -441,10 +472,39 @@ export default function FinanceApp() {
         )}
 
         {/* ── Spending Analytics ────────────────────────────────────── */}
-        <FinanceCard title="Spending analytics" eyebrow="This month">
+        <FinanceCard title="Spending analytics" eyebrow="Analytics">
+          {/* Month picker */}
+          <View style={styles.monthPicker}>
+            <Pressable
+              style={styles.monthNavBtn}
+              onPress={() => {
+                setAnalyticsMonthOffset((o) => o - 1);
+                setAnalyticsCategoryFilter(null);
+              }}
+            >
+              <Text style={styles.monthNavBtnText}>‹ Prev</Text>
+            </Pressable>
+            <Text style={styles.monthLabel}>{analyticsMonthLabel}</Text>
+            <Pressable
+              style={[styles.monthNavBtn, analyticsMonthOffset >= 0 && styles.monthNavBtnDisabled]}
+              onPress={() => {
+                if (analyticsMonthOffset < 0) {
+                  setAnalyticsMonthOffset((o) => o + 1);
+                  setAnalyticsCategoryFilter(null);
+                }
+              }}
+            >
+              <Text style={[styles.monthNavBtnText, analyticsMonthOffset >= 0 && styles.monthNavBtnDisabledText]}>
+                Next ›
+              </Text>
+            </Pressable>
+          </View>
+
           {categoryBreakdown.length > 0 ? (
             <View style={styles.analyticsSection}>
-              <Text style={styles.analyticsSectionTitle}>Category breakdown</Text>
+              <Text style={styles.analyticsSectionTitle}>
+                Category breakdown{isCurrentMonth ? ` · day ${dayOfMonth} of ${daysInMonth}` : ''}
+              </Text>
               {analyticsCategoryFilter ? (
                 <Pressable
                   style={styles.filterChip}
@@ -468,6 +528,12 @@ export default function FinanceApp() {
                     category={item.category}
                     amount={item.total}
                     pct={item.pct}
+                    icon={getCategoryIcon(item.category)}
+                    pace={
+                      isCurrentMonth && dayOfMonth > 0
+                        ? (item.total / dayOfMonth) * daysInMonth
+                        : undefined
+                    }
                   />
                 </Pressable>
               ))}
@@ -1014,17 +1080,24 @@ export default function FinanceApp() {
               onPress={() => setAnalyticsCategoryFilter(null)}
             >
               <Text style={styles.filterChipText}>
-                Category: {analyticsCategoryFilter} — tap to clear ×
+                {getCategoryIcon(analyticsCategoryFilter)} {analyticsCategoryFilter} — tap to clear ×
               </Text>
             </Pressable>
           ) : null}
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search transactions by merchant, category, or note"
-            placeholderTextColor="#7d9aa0"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
+          <View style={styles.searchRow}>
+            <TextInput
+              style={[styles.searchInput, styles.searchInputFlex]}
+              placeholder="Search by merchant, category, or note"
+              placeholderTextColor="#7d9aa0"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {searchQuery.length > 0 ? (
+              <Pressable style={styles.searchClear} onPress={() => setSearchQuery('')}>
+                <Text style={styles.searchClearText}>×</Text>
+              </Pressable>
+            ) : null}
+          </View>
           {accountTransactions.length ? (
             <View>
               {accountTransactions.map((transaction) => (
@@ -1036,6 +1109,7 @@ export default function FinanceApp() {
                   date={transaction.date}
                   account={selectedAccount?.name ?? transaction.accountId}
                   category={transaction.category}
+                  categoryIcon={getCategoryIcon(transaction.category)}
                   flagged={!transaction.reviewed || transaction.category === 'Other'}
                   selected={transaction.id === selectedTransaction?.id}
                   onPress={() => setSelectedTransactionId(transaction.id)}
@@ -1564,6 +1638,66 @@ const styles = StyleSheet.create({
     color: palette.warning,
     fontSize: 12,
     lineHeight: 17,
+  },
+
+  // ── Month picker ───────────────────────────────────────────────────────────
+  monthPicker: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#0d1e26',
+    borderRadius: 14,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  monthNavBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  monthNavBtnDisabled: {
+    opacity: 0.3,
+  },
+  monthNavBtnText: {
+    color: palette.accentSoft,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  monthNavBtnDisabledText: {
+    color: palette.muted,
+  },
+  monthLabel: {
+    color: palette.text,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+
+  // ── Search ─────────────────────────────────────────────────────────────────
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  searchInputFlex: {
+    flex: 1,
+    marginTop: 0,
+    marginBottom: 0,
+  },
+  searchClear: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: '#1a3540',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  searchClearText: {
+    color: palette.muted,
+    fontSize: 18,
+    fontWeight: '700',
+    lineHeight: 20,
   },
 
   // ── Analytics ──────────────────────────────────────────────────────────────

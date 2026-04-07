@@ -33,6 +33,23 @@ const CATEGORY_RULES: Array<{ pattern: RegExp; category: string }> = [
 
 export const CATEGORY_OPTIONS = [...CATEGORY_ORDER];
 
+export const CATEGORY_ICONS: Record<string, string> = {
+  Income: '💰',
+  Housing: '🏠',
+  Utilities: '⚡',
+  Groceries: '🛒',
+  Dining: '🍽️',
+  Fuel: '⛽',
+  Travel: '✈️',
+  Subscriptions: '📱',
+  Shopping: '🛍️',
+  Health: '❤️',
+  Transfer: '↔️',
+  Fees: '💸',
+  Savings: '🏦',
+  Other: '📋',
+};
+
 // Known subscription services for detection (display name -> regex)
 export const KNOWN_SUBSCRIPTIONS: Array<{ name: string; pattern: RegExp }> = [
   { name: 'Netflix', pattern: /netflix/i },

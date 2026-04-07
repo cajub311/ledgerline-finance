@@ -1,5 +1,5 @@
 import seedData from '../data/financeSeed.json';
-import { CATEGORY_OPTIONS, cycleCategory, normalizeCategory } from './categories';
+import { CATEGORY_ICONS, CATEGORY_OPTIONS, cycleCategory, normalizeCategory } from './categories';
 import type {
   Budget,
   BudgetStatus,
@@ -307,17 +307,42 @@ export function getAccountsWithBalances(
 
 export function getBudgetPills(state: FinanceState) {
   const summary = getFinanceSummary(state);
+  const savingsRate = getSavingsRate(state);
+  const pills: string[] = [];
 
-  return [
-    `Net worth ${summary.netWorth.toFixed(2)}`,
-    `${summary.unreviewedCount} pending review`,
-    `${summary.importedFiles} imports`,
-    `${summary.uncategorizedCount} uncategorized`,
-  ];
+  if (summary.unreviewedCount > 0) pills.push(`${summary.unreviewedCount} to review`);
+  if (summary.uncategorizedCount > 0) pills.push(`${summary.uncategorizedCount} uncategorized`);
+  if (savingsRate > 0) pills.push(`${savingsRate}% saved this month`);
+  pills.push(`${summary.importedFiles} import${summary.importedFiles === 1 ? '' : 's'}`);
+
+  return pills;
 }
 
 export function getCategoryOptions(): string[] {
   return [...CATEGORY_OPTIONS];
+}
+
+export function getCategoryIcon(category: string): string {
+  return CATEGORY_ICONS[category] ?? '📋';
+}
+
+export function getSavingsRate(state: FinanceState): number {
+  const currentMonthKey = getCurrentMonthKey();
+  const monthTxs = state.transactions.filter((tx) => tx.date.startsWith(currentMonthKey));
+  const income = monthTxs.filter((tx) => tx.amount > 0).reduce((s, tx) => s + tx.amount, 0);
+  const spend = monthTxs
+    .filter((tx) => tx.amount < 0 && tx.category !== 'Transfer')
+    .reduce((s, tx) => s + Math.abs(tx.amount), 0);
+  if (income === 0) return 0;
+  return Number(Math.max(0, ((income - spend) / income) * 100).toFixed(1));
+}
+
+export function getBudgetHealthScore(state: FinanceState): number | null {
+  if (state.budgets.length === 0) return null;
+  const now = new Date();
+  const statuses = getBudgetStatus(state, now.getFullYear(), now.getMonth() + 1);
+  const ok = statuses.filter((s) => s.status === 'ok').length;
+  return Math.round((ok / statuses.length) * 100);
 }
 
 // ─── Analytics ────────────────────────────────────────────────────────────────

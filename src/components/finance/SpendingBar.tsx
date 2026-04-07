@@ -25,34 +25,53 @@ export function SpendingBar({
   category,
   amount,
   pct,
+  icon,
+  pace,
 }: {
   category: string;
   amount: number;
   pct: number;
+  icon?: string;
+  pace?: number;
 }) {
   const color = getCategoryColor(category);
   const barWidth = `${Math.max(2, Math.round(pct * 100))}%` as `${number}%`;
 
   return (
-    <View style={styles.row}>
-      <Text style={styles.label} numberOfLines={1}>
-        {category}
-      </Text>
+    <View style={styles.wrapper}>
+      <View style={styles.row}>
+        {icon ? <Text style={styles.icon}>{icon}</Text> : null}
+        <Text style={styles.label} numberOfLines={1}>
+          {category}
+        </Text>
       <View style={styles.track}>
         <View style={[styles.bar, { width: barWidth, backgroundColor: color }]} />
       </View>
       <Text style={styles.amount}>${amount.toFixed(0)}</Text>
       <Text style={styles.pct}>{Math.round(pct * 100)}%</Text>
     </View>
+    {pace != null && pace > 0 ? (
+      <Text style={styles.pace}>On pace for ${Math.round(pace)}/mo</Text>
+    ) : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  wrapper: {
+    gap: 2,
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     minHeight: 28,
+  },
+  icon: {
+    fontSize: 13,
+    width: 18,
+    textAlign: 'center',
+    flexShrink: 0,
   },
   label: {
     color: '#eff7f4',
@@ -86,5 +105,10 @@ const styles = StyleSheet.create({
     width: 30,
     textAlign: 'right',
     flexShrink: 0,
+  },
+  pace: {
+    color: '#5c8c96',
+    fontSize: 10,
+    marginLeft: 26,
   },
 });
