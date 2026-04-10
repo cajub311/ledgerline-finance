@@ -84,6 +84,8 @@ const palette = {
   positive: '#8fd3b4',
 };
 
+type AppTab = 'dashboard' | 'transactions' | 'budgets' | 'forecast' | 'accounts';
+
 export default function FinanceApp() {
   const [state, setState] = useState<FinanceState>(() => createFinanceState());
   const [loading, setLoading] = useState(true);
@@ -120,6 +122,7 @@ export default function FinanceApp() {
   const [goalEditValue, setGoalEditValue] = useState('');
   const [forecastHorizon, setForecastHorizon] = useState<30 | 60 | 90>(30);
   const [forecastThresholdInput, setForecastThresholdInput] = useState('1000');
+  const [activeTab, setActiveTab] = useState<AppTab>('dashboard');
 
   useEffect(() => {
     let mounted = true;
@@ -757,6 +760,12 @@ export default function FinanceApp() {
     return `${value < 0 ? '-' : ''}$${Math.round(abs)}`;
   }
 
+  const showDashboardTab = activeTab === 'dashboard';
+  const showTransactionsTab = activeTab === 'transactions';
+  const showBudgetsTab = activeTab === 'budgets';
+  const showForecastTab = activeTab === 'forecast';
+  const showAccountsTab = activeTab === 'accounts';
+
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingShell}>
@@ -801,69 +810,99 @@ export default function FinanceApp() {
           </View>
         </View>
 
-        <View style={styles.summaryGrid}>
-          {visibleSummaryWidgets.map((widgetId) => renderSummaryTile(widgetId))}
+        <View style={styles.tabBar}>
+          {(
+            [
+              ['dashboard', 'Dashboard'],
+              ['transactions', 'Transactions'],
+              ['budgets', 'Budgets'],
+              ['forecast', 'Forecast'],
+              ['accounts', 'Accounts'],
+            ] as const
+          ).map(([tabId, tabLabel]) => {
+            const active = activeTab === tabId;
+            return (
+              <Pressable
+                key={tabId}
+                style={[styles.tabButton, active && styles.tabButtonActive]}
+                onPress={() => setActiveTab(tabId)}
+              >
+                <Text style={[styles.tabButtonText, active && styles.tabButtonTextActive]}>
+                  {tabLabel}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
 
-        <FinanceCard title="Dashboard layout" eyebrow="Customize cards">
-          <Text style={styles.bodyText}>
-            Show or hide summary cards and reorder them so the top of your dashboard reflects what
-            you watch most.
-          </Text>
-          <View style={styles.layoutList}>
-            {summaryWidgetOrder.map((widgetId) => {
-              const index = widgetOrderIndexMap.get(widgetId) ?? 0;
-              const canMoveUp = index > 0;
-              const canMoveDown = index < summaryWidgetOrder.length - 1;
-              const isVisible = !hiddenSummaryWidgetSet.has(widgetId);
-              return (
-                <View key={widgetId} style={styles.layoutRow}>
-                  <View style={styles.layoutCopy}>
-                    <Text style={styles.layoutName}>{SUMMARY_WIDGET_LABELS[widgetId]}</Text>
-                    <Text style={styles.layoutMeta}>
-                      {isVisible ? 'Visible on dashboard' : 'Hidden from dashboard'}
-                    </Text>
-                  </View>
-                  <View style={styles.layoutActions}>
-                    <Pressable
-                      style={[
-                        styles.layoutActionButton,
-                        !canMoveUp && styles.layoutActionButtonDisabled,
-                      ]}
-                      onPress={() => moveSummaryWidget(widgetId, -1)}
-                      disabled={!canMoveUp}
-                    >
-                      <Text style={styles.layoutActionButtonText}>↑</Text>
-                    </Pressable>
-                    <Pressable
-                      style={[
-                        styles.layoutActionButton,
-                        !canMoveDown && styles.layoutActionButtonDisabled,
-                      ]}
-                      onPress={() => moveSummaryWidget(widgetId, 1)}
-                      disabled={!canMoveDown}
-                    >
-                      <Text style={styles.layoutActionButtonText}>↓</Text>
-                    </Pressable>
-                    <Pressable
-                      style={[
-                        styles.layoutToggleButton,
-                        isVisible && styles.layoutToggleButtonActive,
-                      ]}
-                      onPress={() => toggleSummaryWidget(widgetId)}
-                    >
-                      <Text style={styles.layoutToggleButtonText}>
-                        {isVisible ? 'Visible' : 'Hidden'}
-                      </Text>
-                    </Pressable>
-                  </View>
-                </View>
-              );
-            })}
-          </View>
-        </FinanceCard>
+        {showDashboardTab ? (
+          <>
+            <View style={styles.summaryGrid}>
+              {visibleSummaryWidgets.map((widgetId) => renderSummaryTile(widgetId))}
+            </View>
 
-        <FinanceCard title="Action plan" eyebrow="What to do next" tone="accent">
+            <FinanceCard title="Dashboard layout" eyebrow="Customize cards">
+              <Text style={styles.bodyText}>
+                Show or hide summary cards and reorder them so the top of your dashboard reflects what
+                you watch most.
+              </Text>
+              <View style={styles.layoutList}>
+                {summaryWidgetOrder.map((widgetId) => {
+                  const index = widgetOrderIndexMap.get(widgetId) ?? 0;
+                  const canMoveUp = index > 0;
+                  const canMoveDown = index < summaryWidgetOrder.length - 1;
+                  const isVisible = !hiddenSummaryWidgetSet.has(widgetId);
+                  return (
+                    <View key={widgetId} style={styles.layoutRow}>
+                      <View style={styles.layoutCopy}>
+                        <Text style={styles.layoutName}>{SUMMARY_WIDGET_LABELS[widgetId]}</Text>
+                        <Text style={styles.layoutMeta}>
+                          {isVisible ? 'Visible on dashboard' : 'Hidden from dashboard'}
+                        </Text>
+                      </View>
+                      <View style={styles.layoutActions}>
+                        <Pressable
+                          style={[
+                            styles.layoutActionButton,
+                            !canMoveUp && styles.layoutActionButtonDisabled,
+                          ]}
+                          onPress={() => moveSummaryWidget(widgetId, -1)}
+                          disabled={!canMoveUp}
+                        >
+                          <Text style={styles.layoutActionButtonText}>↑</Text>
+                        </Pressable>
+                        <Pressable
+                          style={[
+                            styles.layoutActionButton,
+                            !canMoveDown && styles.layoutActionButtonDisabled,
+                          ]}
+                          onPress={() => moveSummaryWidget(widgetId, 1)}
+                          disabled={!canMoveDown}
+                        >
+                          <Text style={styles.layoutActionButtonText}>↓</Text>
+                        </Pressable>
+                        <Pressable
+                          style={[
+                            styles.layoutToggleButton,
+                            isVisible && styles.layoutToggleButtonActive,
+                          ]}
+                          onPress={() => toggleSummaryWidget(widgetId)}
+                        >
+                          <Text style={styles.layoutToggleButtonText}>
+                            {isVisible ? 'Visible' : 'Hidden'}
+                          </Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </FinanceCard>
+          </>
+        ) : null}
+
+        {showDashboardTab ? (
+          <FinanceCard title="Action plan" eyebrow="What to do next" tone="accent">
           <Text style={styles.bodyText}>
             This turns statement imports into concrete next actions so you can improve outcomes, not
             just view transactions.
@@ -938,9 +977,11 @@ export default function FinanceApp() {
               );
             })}
           </View>
-        </FinanceCard>
+          </FinanceCard>
+        ) : null}
 
-        <FinanceCard title="Month review" eyebrow="Compared to last month">
+        {showDashboardTab ? (
+          <FinanceCard title="Month review" eyebrow="Compared to last month">
           <Text style={styles.bodyText}>
             Catch trend changes early so you can adjust now instead of waiting for month-end.
           </Text>
@@ -1004,9 +1045,11 @@ export default function FinanceApp() {
               </View>
             )}
           </View>
-        </FinanceCard>
+          </FinanceCard>
+        ) : null}
 
-        <FinanceCard title="Cash flow forecast" eyebrow="30 / 60 / 90 day projection">
+        {showForecastTab ? (
+          <FinanceCard title="Cash flow forecast" eyebrow="30 / 60 / 90 day projection">
           <Text style={styles.bodyText}>
             Projects your liquid balance using historical recurring income and expenses, then flags
             dates where you may drop below your threshold.
@@ -1122,10 +1165,11 @@ export default function FinanceApp() {
               </Text>
             </View>
           )}
-        </FinanceCard>
+          </FinanceCard>
+        ) : null}
 
         {/* ── Spending Insights ─────────────────────────────────────── */}
-        {insights.length > 0 && (
+        {showDashboardTab && insights.length > 0 && (
           <FinanceCard title="Spending insights" eyebrow="Smart analysis">
             {insights.map((insight, i) => (
               <InsightBadge key={i} text={insight} index={i} />
@@ -1134,7 +1178,8 @@ export default function FinanceApp() {
         )}
 
         {/* ── Spending Analytics ────────────────────────────────────── */}
-        <FinanceCard title="Spending analytics" eyebrow="Analytics">
+        {showDashboardTab ? (
+          <FinanceCard title="Spending analytics" eyebrow="Analytics">
           {/* Month picker */}
           <View style={styles.monthPicker}>
             <Pressable
@@ -1241,10 +1286,12 @@ export default function FinanceApp() {
               </View>
             </View>
           )}
-        </FinanceCard>
+          </FinanceCard>
+        ) : null}
 
         {/* ── Subscriptions ─────────────────────────────────────────── */}
-        <FinanceCard title="Subscriptions" eyebrow="Recurring charges">
+        {showDashboardTab ? (
+          <FinanceCard title="Subscriptions" eyebrow="Recurring charges">
           {detectedSubscriptions.length > 0 ? (
             <View style={styles.subStack}>
               {detectedSubscriptions.map((sub) => (
@@ -1282,10 +1329,12 @@ export default function FinanceApp() {
               </Text>
             </View>
           )}
-        </FinanceCard>
+          </FinanceCard>
+        ) : null}
 
         {/* ── Monthly Budgets ───────────────────────────────────────── */}
-        <FinanceCard title="Monthly budgets" eyebrow="Spending limits">
+        {showBudgetsTab ? (
+          <FinanceCard title="Monthly budgets" eyebrow="Spending limits">
           {budgetStatuses.length > 0 ? (
             <View style={styles.budgetStack}>
               {budgetStatuses.map((bs) => {
@@ -1410,10 +1459,12 @@ export default function FinanceApp() {
               <Text style={styles.secondaryButtonText}>+ Add budget</Text>
             </Pressable>
           )}
-        </FinanceCard>
+          </FinanceCard>
+        ) : null}
 
         {/* ── Financial Goals ───────────────────────────────────────── */}
-        <FinanceCard title="Financial goals" eyebrow="Savings targets">
+        {showBudgetsTab ? (
+          <FinanceCard title="Financial goals" eyebrow="Savings targets">
           {state.goals.length > 0 ? (
             <View style={styles.goalsStack}>
               {state.goals.map((goal) => {
@@ -1547,30 +1598,34 @@ export default function FinanceApp() {
               <Text style={styles.secondaryButtonText}>+ Add goal</Text>
             </Pressable>
           )}
-        </FinanceCard>
+          </FinanceCard>
+        ) : null}
 
-        <ImportHubSection
-          styles={styles}
-          importing={importing}
-          importMessage={importMessage}
-          pastedStatement={pastedStatement}
-          onPastedStatementChange={setPastedStatement}
-          onUploadStatements={importStatementFiles}
-          onResetDemo={resetWorkspace}
-          onExportCsv={exportCsv}
-          onExportBackup={exportBackup}
-          onImportBackupFileSelected={(e) => importBackupFromFileList(e.target.files)}
-          onImportPastedText={importPastedStatement}
-          onImportTip={() =>
-            setImportMessage(
-              'Tip: if you only have a PDF, copy the statement text or use the web build to upload the file directly.',
-            )
-          }
-          imports={state.imports}
-          hasTransactions={state.transactions.length > 0}
-        />
+        {showTransactionsTab ? (
+          <ImportHubSection
+            styles={styles}
+            importing={importing}
+            importMessage={importMessage}
+            pastedStatement={pastedStatement}
+            onPastedStatementChange={setPastedStatement}
+            onUploadStatements={importStatementFiles}
+            onResetDemo={resetWorkspace}
+            onExportCsv={exportCsv}
+            onExportBackup={exportBackup}
+            onImportBackupFileSelected={(e) => importBackupFromFileList(e.target.files)}
+            onImportPastedText={importPastedStatement}
+            onImportTip={() =>
+              setImportMessage(
+                'Tip: if you only have a PDF, copy the statement text or use the web build to upload the file directly.',
+              )
+            }
+            imports={state.imports}
+            hasTransactions={state.transactions.length > 0}
+          />
+        ) : null}
 
-        <FinanceCard title="Quick add" eyebrow="Manual entry" tone="warning">
+        {showTransactionsTab ? (
+          <FinanceCard title="Quick add" eyebrow="Manual entry" tone="warning">
           <Text style={styles.bodyText}>
             Keep the ledger complete by logging cash spending, transfers, or any item that should
             live beside the imported Wells Fargo rows.
@@ -1638,9 +1693,11 @@ export default function FinanceApp() {
               <Text style={styles.primaryButtonText}>Add manual transaction</Text>
             </Pressable>
           </View>
-        </FinanceCard>
+          </FinanceCard>
+        ) : null}
 
-        <FinanceCard title="Accounts" eyebrow="Balances">
+        {showAccountsTab ? (
+          <FinanceCard title="Accounts" eyebrow="Balances">
           <View style={styles.accountStack}>
             {accounts.map((account) => {
               const selected = account.id === selectedAccount?.id;
@@ -1674,9 +1731,11 @@ export default function FinanceApp() {
               );
             })}
           </View>
-        </FinanceCard>
+          </FinanceCard>
+        ) : null}
 
-        <FinanceCard title="Transaction review" eyebrow="Ledger">
+        {showTransactionsTab ? (
+          <FinanceCard title="Transaction review" eyebrow="Ledger">
           <Text style={styles.bodyText}>
             Transactions stay reviewable: change a category, mark something reviewed, and keep the
             ledger moving without leaving the workspace.
@@ -1785,9 +1844,11 @@ export default function FinanceApp() {
               </View>
             </View>
           ) : null}
-        </FinanceCard>
+          </FinanceCard>
+        ) : null}
 
-        <FinanceCard title="Latest activity" eyebrow="Imports">
+        {showTransactionsTab ? (
+          <FinanceCard title="Latest activity" eyebrow="Imports">
           <Text style={styles.bodyText}>
             This is the review trail. It keeps the imported files visible so it is obvious what was
             parsed and what still needs a human check.
@@ -1810,7 +1871,8 @@ export default function FinanceApp() {
               above to clear them out.
             </Text>
           ) : null}
-        </FinanceCard>
+          </FinanceCard>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -1917,6 +1979,35 @@ const styles = StyleSheet.create({
     color: palette.muted,
     fontSize: 12,
     lineHeight: 16,
+  },
+  tabBar: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  tabButton: {
+    minHeight: 34,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#3a5e67',
+    backgroundColor: '#10242b',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  tabButtonActive: {
+    borderColor: '#5b8d7b',
+    backgroundColor: '#163328',
+  },
+  tabButtonText: {
+    color: '#dce9e5',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  tabButtonTextActive: {
+    color: '#eff7f4',
   },
   summaryGrid: {
     flexDirection: 'row',
