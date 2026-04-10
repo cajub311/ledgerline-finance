@@ -33,6 +33,7 @@ import {
   getCategoryIcon,
   getCategoryOptions,
   getFinanceSummary,
+  getGuidanceSnapshot,
   getGoalStats,
   getLatestTransactions,
   getMonthlyTrend,
@@ -47,6 +48,7 @@ import {
   toggleTransactionReview,
   updateGoalProgress,
   updateTransactionCategory,
+  type GuidanceCta,
   type FinanceState,
   parseFinanceBackupJson,
   serializeFinanceState,
@@ -191,6 +193,7 @@ export default function FinanceApp() {
     () => getBudgetStatus(state, currentYear, currentMonth),
     [state, currentYear, currentMonth],
   );
+  const guidance = useMemo(() => getGuidanceSnapshot(state), [state]);
 
   const maxMonthlySpend = useMemo(
     () => Math.max(...monthlyTrend.map((m) => m.spend), 1),
@@ -436,6 +439,86 @@ export default function FinanceApp() {
     setPastedStatement('');
   }
 
+  function jumpToTransactionsView(filter: 'all' | 'unreviewed' | 'other' = 'all') {
+    const base = selectedAccount?.id ?? accounts[0]?.id;
+
+    if (base) {
+      setSelectedAccountId(base);
+    }
+
+    if (filter === 'all') {
+      setAnalyticsCategoryFilter(null);
+      return;
+    }
+
+    const scoped = state.transactions
+      .filter((transaction) => transaction.accountId === base)
+      .filter((transaction) =>
+        filter === 'unreviewed' ? !transaction.reviewed : transaction.category === 'Other',
+      )
+      .sort((left, right) => right.date.localeCompare(left.date));
+
+    const fallback = state.transactions
+      .filter((transaction) =>
+        filter === 'unreviewed' ? !transaction.reviewed : transaction.category === 'Other',
+      )
+      .sort((left, right) => right.date.localeCompare(left.date));
+
+    const match = scoped[0] ?? fallback[0];
+    if (match) {
+      setSelectedAccountId(match.accountId);
+      setSelectedTransactionId(match.id);
+    }
+  }
+
+  function getGuidanceCtaLabel(cta: GuidanceCta) {
+    switch (cta) {
+      case 'review':
+        return 'Open review';
+      case 'categorize':
+        return 'Fix categories';
+      case 'budgets':
+        return 'Check budgets';
+      case 'subscriptions':
+        return 'Review subscriptions';
+      case 'goals':
+        return 'Update goals';
+      default:
+        return 'Done';
+    }
+  }
+
+  function handleGuidanceCta(cta: GuidanceCta) {
+    if (cta === 'review') {
+      jumpToTransactionsView('unreviewed');
+      setImportMessage('Action plan: review unreviewed rows in Transaction review.');
+      return;
+    }
+
+    if (cta === 'categorize') {
+      jumpToTransactionsView('other');
+      setImportMessage('Action plan: recategorize rows in "Other" for better analytics.');
+      return;
+    }
+
+    if (cta === 'budgets') {
+      setImportMessage('Action plan: adjust Monthly budgets based on your pace and risk.');
+      return;
+    }
+
+    if (cta === 'subscriptions') {
+      setImportMessage('Action plan: inspect Subscriptions and decide what to pause or cancel.');
+      return;
+    }
+
+    if (cta === 'goals') {
+      setImportMessage('Action plan: update Financial goals so monthly targets stay realistic.');
+      return;
+    }
+
+    setImportMessage('Action plan complete. Keep importing and reviewing weekly.');
+  }
+
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingShell}>
@@ -498,6 +581,83 @@ export default function FinanceApp() {
           />
           <SummaryTile label="Unreviewed" value={`${summary.unreviewedCount}`} detail="Transactions to review" tone={summary.unreviewedCount > 0 ? 'alert' : 'neutral'} />
         </View>
+
+        <FinanceCard title="Action plan" eyebrow="What to do next" tone="accent">
+          <Text style={styles.bodyText}>
+            This turns statement imports into concrete next actions so you can improve outcomes, not
+            just view transactions.
+          </Text>
+          <View style={styles.actionKpiRow}>
+            <View style={styles.actionKpiCard}>
+              <Text style={styles.actionKpiLabel}>Safe to spend</Text>
+              <Text
+                style={[
+                  styles.actionKpiValue,
+                  guidance.safeToSpend > 0 ? styles.actionKpiValuePositive : styles.actionKpiValueDanger,
+                ]}
+              >
+                {formatCurrency(guidance.safeToSpend)}
+              </Text>
+              <Text style={styles.actionKpiDetail}>After aiming to save 20% of this month&apos;s income.</Text>
+            </View>
+            <View style={styles.actionKpiCard}>
+              <Text style={styles.actionKpiLabel}>Projected month-end</Text>
+              <Text
+                style={[
+                  styles.actionKpiValue,
+                  guidance.projectedMonthEndNet >= 0
+                    ? styles.actionKpiValuePositive
+                    : styles.actionKpiValueDanger,
+                ]}
+              >
+                {formatCurrency(guidance.projectedMonthEndNet)}
+              </Text>
+              <Text style={styles.actionKpiDetail}>
+                Pace: {formatCurrency(guidance.averageDailySpend)}/day with {guidance.daysRemainingInMonth}{' '}
+                day{guidance.daysRemainingInMonth === 1 ? '' : 's'} left.
+              </Text>
+            </View>
+            <View style={styles.actionKpiCard}>
+              <Text style={styles.actionKpiLabel}>Recurring burn</Text>
+              <Text style={styles.actionKpiValue}>
+                {formatCurrency(guidance.monthlySubscriptionBurn)}
+              </Text>
+              <Text style={styles.actionKpiDetail}>Estimated monthly subscription total.</Text>
+            </View>
+            <View style={styles.actionKpiCard}>
+              <Text style={styles.actionKpiLabel}>Review completion</Text>
+              <Text style={styles.actionKpiValue}>{guidance.reviewCompletionPct}%</Text>
+              <Text style={styles.actionKpiDetail}>Transactions reviewed this month.</Text>
+            </View>
+          </View>
+          <View style={styles.actionStepList}>
+            {guidance.steps.map((step) => {
+              const dotColor =
+                step.priority === 'high'
+                  ? palette.danger
+                  : step.priority === 'medium'
+                    ? palette.warning
+                    : palette.positive;
+              return (
+                <View key={step.id} style={styles.actionStepRow}>
+                  <View style={[styles.priorityDot, { backgroundColor: dotColor }]} />
+                  <View style={styles.actionStepCopy}>
+                    <Text style={styles.actionStepTitle}>{step.title}</Text>
+                    <Text style={styles.actionStepDetail}>{step.detail}</Text>
+                    <Pressable
+                      style={styles.actionStepButton}
+                      onPress={() => handleGuidanceCta(step.cta)}
+                    >
+                      <Text style={styles.actionStepButtonText}>
+                        {getGuidanceCtaLabel(step.cta)}
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        </FinanceCard>
 
         {/* ── Spending Insights ─────────────────────────────────────── */}
         {insights.length > 0 && (
@@ -1642,6 +1802,96 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     lineHeight: 20,
+  },
+
+  // ── Action plan ────────────────────────────────────────────────────────────
+  actionKpiRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  actionKpiCard: {
+    flexGrow: 1,
+    flexBasis: 0,
+    minWidth: 150,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#2b454f',
+    backgroundColor: '#0d1f26',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  actionKpiLabel: {
+    color: palette.accentSoft,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+  },
+  actionKpiValue: {
+    color: palette.text,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  actionKpiValuePositive: {
+    color: palette.positive,
+  },
+  actionKpiValueDanger: {
+    color: palette.danger,
+  },
+  actionKpiDetail: {
+    color: palette.muted,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  actionStepList: {
+    gap: 8,
+  },
+  actionStepRow: {
+    flexDirection: 'row',
+    gap: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#1f3841',
+    paddingTop: 10,
+    alignItems: 'flex-start',
+  },
+  priorityDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 999,
+    marginTop: 5,
+    flexShrink: 0,
+  },
+  actionStepCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  actionStepTitle: {
+    color: palette.text,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  actionStepDetail: {
+    color: palette.muted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  actionStepButton: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#3f6570',
+    backgroundColor: '#152a31',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    alignSelf: 'flex-start',
+  },
+  actionStepButtonText: {
+    color: '#dce9e5',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
 
   // ── Analytics ──────────────────────────────────────────────────────────────

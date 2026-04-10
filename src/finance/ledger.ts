@@ -11,6 +11,8 @@ import type {
   FinanceSummary,
   FinanceTransaction,
   GoalStats,
+  GuidanceSnapshot,
+  GuidanceStep,
   ImportRecord,
   ManualTransactionDraft,
   MonthlyTrendItem,
@@ -620,6 +622,224 @@ export function getGoalStats(goal: FinancialGoal): GoalStats {
 }
 
 // ─── Smart Insights ───────────────────────────────────────────────────────────
+
+function priorityRank(priority: GuidanceStep['priority']): number {
+  switch (priority) {
+    case 'high':
+      return 0;
+    case 'medium':
+      return 1;
+    default:
+      return 2;
+  }
+}
+
+function toMonthlySubscriptionCost(subscription: DetectedSubscription): number {
+  if (subscription.frequency === 'monthly') {
+    return subscription.amount;
+  }
+
+  if (subscription.frequency === 'weekly') {
+    return (subscription.amount * 52) / 12;
+  }
+
+  return subscription.amount / 12;
+}
+
+export function getGuidanceSnapshot(state: FinanceState, now = new Date()): GuidanceSnapshot {
+  const currentMonthKey = getCurrentMonthKey(now);
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const dayOfMonth = Math.max(1, now.getDate());
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const daysRemainingInMonth = Math.max(0, daysInMonth - dayOfMonth);
+
+  const monthTransactions = state.transactions.filter((transaction) =>
+    transaction.date.startsWith(currentMonthKey),
+  );
+
+  const monthIncome = monthTransactions
+    .filter((transaction) => transaction.amount > 0)
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+  const monthSpend = monthTransactions
+    .filter((transaction) => transaction.amount < 0 && transaction.category !== 'Transfer')
+    .reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0);
+  const averageDailySpend = dayOfMonth > 0 ? monthSpend / dayOfMonth : 0;
+  const projectedMonthEndSpend = monthSpend + averageDailySpend * daysRemainingInMonth;
+  const projectedMonthEndNet = monthIncome - projectedMonthEndSpend;
+  const targetSavingsThisMonth = monthIncome > 0 ? monthIncome * 0.2 : 0;
+  const safeToSpend = Math.max(0, projectedMonthEndNet - targetSavingsThisMonth);
+
+  const reviewedThisMonth = monthTransactions.filter((transaction) => transaction.reviewed).length;
+  const reviewCompletionPct =
+    monthTransactions.length > 0 ? Math.round((reviewedThisMonth / monthTransactions.length) * 100) : 100;
+
+  const summary = getFinanceSummary(state);
+  const budgetStatuses = getBudgetStatus(state, year, month);
+  const subscriptions = detectSubscriptions(state.transactions);
+  const monthlySubscriptionBurn = subscriptions.reduce(
+    (sum, subscription) => sum + toMonthlySubscriptionCost(subscription),
+    0,
+  );
+  const steps: GuidanceStep[] = [];
+
+  if (summary.unreviewedCount > 0) {
+    steps.push({
+      id: 'review-unreviewed',
+      priority: summary.unreviewedCount > 5 ? 'high' : 'medium',
+      title: `Review ${summary.unreviewedCount} pending transaction${summary.unreviewedCount === 1 ? '' : 's'}`,
+      detail:
+        'Your trends and budgets are only reliable once new imports are reviewed. Start with anything marked Review.',
+      cta: 'review',
+    });
+  }
+
+  if (summary.uncategorizedCount > 0) {
+    steps.push({
+      id: 'categorize-other',
+      priority: summary.uncategorizedCount > 5 ? 'high' : 'medium',
+      title: `Categorize ${summary.uncategorizedCount} uncategorized transaction${summary.uncategorizedCount === 1 ? '' : 's'}`,
+      detail:
+        'Moving items out of "Other" improves category breakdowns and makes budget alerts far more accurate.',
+      cta: 'categorize',
+    });
+  }
+
+  const overBudgets = budgetStatuses
+    .filter((status) => status.status === 'over')
+    .sort((left, right) => right.pct - left.pct);
+  const warningBudgets = budgetStatuses
+    .filter((status) => status.status === 'warning')
+    .sort((left, right) => right.pct - left.pct);
+
+  if (overBudgets.length > 0) {
+    const worst = overBudgets[0];
+    const overBy = Math.max(0, worst.spent - worst.limit);
+    steps.push({
+      id: 'budget-over',
+      priority: 'high',
+      title: `${worst.category} is over budget by $${overBy.toFixed(0)}`,
+      detail:
+        overBudgets.length > 1
+          ? `${overBudgets.length} categories are already over this month. Tightening this week avoids month-end surprises.`
+          : 'Spending in this category is already above your monthly limit. Consider a temporary cap.',
+      cta: 'budgets',
+    });
+  } else if (warningBudgets.length > 0) {
+    const nearest = warningBudgets[0];
+    const remaining = Math.max(0, nearest.limit - nearest.spent);
+    steps.push({
+      id: 'budget-warning',
+      priority: 'medium',
+      title: `${nearest.category} has only $${remaining.toFixed(0)} left this month`,
+      detail:
+        'You are close to your limit. Setting a weekly cap now can keep this category on track.',
+      cta: 'budgets',
+    });
+  } else if (state.budgets.length === 0 && monthSpend > 0) {
+    steps.push({
+      id: 'budget-setup',
+      priority: 'medium',
+      title: 'Create your first budget limits',
+      detail:
+        'Budgets turn imported transactions into alerts and pacing guidance, not just a history list.',
+      cta: 'budgets',
+    });
+  }
+
+  if (subscriptions.length > 0) {
+    const topSubscription = subscriptions[0];
+    const yearlyBurn = subscriptions.reduce((sum, subscription) => sum + subscription.annualCost, 0);
+    steps.push({
+      id: 'subscription-review',
+      priority: monthlySubscriptionBurn >= 150 ? 'high' : 'medium',
+      title: `Recurring charges: about $${monthlySubscriptionBurn.toFixed(0)}/mo`,
+      detail: `Top line item is ${topSubscription.payee}. Reviewing just one subscription can free up your monthly margin.`,
+      cta: 'subscriptions',
+    });
+
+    if (yearlyBurn >= 1000) {
+      steps.push({
+        id: 'subscription-annual',
+        priority: 'medium',
+        title: `Subscription burn is $${yearlyBurn.toFixed(0)} per year`,
+        detail: 'Try pausing or downgrading one service and redirect the savings to a goal.',
+        cta: 'subscriptions',
+      });
+    }
+  }
+
+  const mostUrgentGoal = state.goals
+    .map((goal) => ({ goal, stats: getGoalStats(goal) }))
+    .filter(({ stats }) => stats.pct < 1)
+    .sort((left, right) => left.stats.daysLeft - right.stats.daysLeft)[0];
+
+  if (mostUrgentGoal) {
+    const urgencyPriority: GuidanceStep['priority'] =
+      mostUrgentGoal.stats.daysLeft <= 90 ? 'high' : 'medium';
+    steps.push({
+      id: `goal-${mostUrgentGoal.goal.id}`,
+      priority: urgencyPriority,
+      title: `"${mostUrgentGoal.goal.name}" needs $${mostUrgentGoal.stats.monthlyRequired.toFixed(0)}/mo`,
+      detail: `You have ${mostUrgentGoal.stats.daysLeft} day${mostUrgentGoal.stats.daysLeft === 1 ? '' : 's'} left to reach ${mostUrgentGoal.goal.targetDate}.`,
+      cta: 'goals',
+    });
+  } else if (state.goals.length === 0 && monthIncome > 0) {
+    steps.push({
+      id: 'goal-setup',
+      priority: 'low',
+      title: 'Add a savings goal to stay motivated',
+      detail: 'A simple target (emergency fund, trip, debt payoff) makes every import session actionable.',
+      cta: 'goals',
+    });
+  }
+
+  if (projectedMonthEndNet < 0 && monthIncome > 0) {
+    steps.push({
+      id: 'month-net-risk',
+      priority: 'high',
+      title: `At current pace you may overspend by $${Math.abs(projectedMonthEndNet).toFixed(0)}`,
+      detail:
+        'Reduce discretionary spending now to finish the month positive and avoid pulling from savings.',
+      cta: 'budgets',
+    });
+  } else if (projectedMonthEndNet >= 0 && targetSavingsThisMonth > 0 && projectedMonthEndNet < targetSavingsThisMonth) {
+    steps.push({
+      id: 'savings-gap',
+      priority: 'medium',
+      title: `You are $${(targetSavingsThisMonth - projectedMonthEndNet).toFixed(0)} short of a 20% savings month`,
+      detail:
+        'Trim one spending category or cancel one recurring charge to close the gap.',
+      cta: 'budgets',
+    });
+  }
+
+  if (steps.length === 0) {
+    steps.push({
+      id: 'all-good',
+      priority: 'low',
+      title: 'You are on track this month',
+      detail:
+        'No urgent risks detected. Keep reviewing imports weekly and update goals as balances change.',
+      cta: 'none',
+    });
+  }
+
+  const rankedSteps = steps
+    .sort((left, right) => priorityRank(left.priority) - priorityRank(right.priority))
+    .slice(0, 5);
+
+  return {
+    safeToSpend: Number(safeToSpend.toFixed(2)),
+    projectedMonthEndNet: Number(projectedMonthEndNet.toFixed(2)),
+    projectedMonthEndSpend: Number(projectedMonthEndSpend.toFixed(2)),
+    monthlySubscriptionBurn: Number(monthlySubscriptionBurn.toFixed(2)),
+    averageDailySpend: Number(averageDailySpend.toFixed(2)),
+    daysRemainingInMonth,
+    reviewCompletionPct,
+    steps: rankedSteps,
+  };
+}
 
 export function generateInsights(state: FinanceState): string[] {
   const insights: string[] = [];

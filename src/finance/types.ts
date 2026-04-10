@@ -139,3 +139,25 @@ export interface GoalStats {
   daysLeft: number;
   monthlyRequired: number;
 }
+
+export type GuidancePriority = 'high' | 'medium' | 'low';
+export type GuidanceCta = 'review' | 'categorize' | 'budgets' | 'subscriptions' | 'goals' | 'none';
+
+export interface GuidanceStep {
+  id: string;
+  priority: GuidancePriority;
+  title: string;
+  detail: string;
+  cta: GuidanceCta;
+}
+
+export interface GuidanceSnapshot {
+  safeToSpend: number;
+  projectedMonthEndNet: number;
+  projectedMonthEndSpend: number;
+  monthlySubscriptionBurn: number;
+  averageDailySpend: number;
+  daysRemainingInMonth: number;
+  reviewCompletionPct: number;
+  steps: GuidanceStep[];
+}

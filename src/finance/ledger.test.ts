@@ -8,6 +8,7 @@ import {
   createFinanceState,
   getBudgetStatus,
   getFinanceSummary,
+  getGuidanceSnapshot,
   rotateTransactionCategory,
   setBudget,
 } from './ledger';
@@ -69,4 +70,14 @@ test('setBudget adds a category limit visible in budget status', () => {
 
   assert.ok(row);
   assert.equal(row?.limit, 100);
+});
+
+test('guidance snapshot computes action steps and pacing metrics', () => {
+  const state = createFinanceState();
+  const snapshot = getGuidanceSnapshot(state, new Date('2026-04-10T12:00:00.000Z'));
+
+  assert.ok(snapshot.steps.length > 0);
+  assert.ok(snapshot.monthlySubscriptionBurn > 0);
+  assert.ok(snapshot.projectedMonthEndSpend >= 0);
+  assert.ok(snapshot.reviewCompletionPct <= 100);
 });
