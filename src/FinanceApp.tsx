@@ -40,16 +40,21 @@ import {
   getSavingsRate,
   getTopMerchants,
   hasUnreviewedTransactions,
+  loadSummaryWidgetPrefs,
   rehydrateFinanceState,
   removeGoal,
   rotateTransactionCategory,
+  saveSummaryWidgetPrefs,
   setBudget,
   removeBudget,
+  SUMMARY_WIDGET_IDS,
+  SUMMARY_WIDGET_LABELS,
   toggleTransactionReview,
   updateGoalProgress,
   updateTransactionCategory,
   type GuidanceCta,
   type FinanceState,
+  type SummaryWidgetId,
   parseFinanceBackupJson,
   serializeFinanceState,
 } from './finance';
@@ -194,10 +199,78 @@ export default function FinanceApp() {
     [state, currentYear, currentMonth],
   );
   const guidance = useMemo(() => getGuidanceSnapshot(state), [state]);
+  const previousMonth = useMemo(() => {
+    const d = new Date(currentYear, currentMonth - 2, 1);
+    return { year: d.getFullYear(), month: d.getMonth() + 1 };
+  }, [currentMonth, currentYear]);
+  const previousMonthBreakdown = useMemo(
+    () => getCategoryBreakdown(state.transactions, previousMonth.year, previousMonth.month),
+    [previousMonth.month, previousMonth.year, state.transactions],
+  );
+  const previousMonthSpend = useMemo(
+    () => Number(previousMonthBreakdown.reduce((sum, item) => sum + item.total, 0).toFixed(2)),
+    [previousMonthBreakdown],
+  );
+  const monthDeltaPct = useMemo(() => {
+    if (previousMonthSpend <= 0) {
+      return 0;
+    }
+    return Number((((summary.monthSpend - previousMonthSpend) / previousMonthSpend) * 100).toFixed(1));
+  }, [previousMonthSpend, summary.monthSpend]);
+  const topCategoryNow = categoryBreakdown[0] ?? null;
+  const monthReviewRows = useMemo(() => {
+    const previousMap = new Map(previousMonthBreakdown.map((item) => [item.category, item.total] as const));
+    const categories = new Set<string>([
+      ...categoryBreakdown.slice(0, 4).map((item) => item.category),
+      ...previousMonthBreakdown.slice(0, 4).map((item) => item.category),
+    ]);
+
+    return [...categories]
+      .map((category) => {
+        const current = categoryBreakdown.find((item) => item.category === category)?.total ?? 0;
+        const previous = previousMap.get(category) ?? 0;
+        const deltaPct =
+          previous > 0 ? Number((((current - previous) / previous) * 100).toFixed(1)) : current > 0 ? 100 : 0;
+        return { category, current, previous, deltaPct };
+      })
+      .sort((left, right) => Math.abs(right.deltaPct) - Math.abs(left.deltaPct))
+      .slice(0, 5);
+  }, [categoryBreakdown, previousMonthBreakdown]);
 
   const maxMonthlySpend = useMemo(
     () => Math.max(...monthlyTrend.map((m) => m.spend), 1),
     [monthlyTrend],
+  );
+
+  const [summaryWidgetOrder, setSummaryWidgetOrder] = useState<SummaryWidgetId[]>(() => [
+    ...SUMMARY_WIDGET_IDS,
+  ]);
+  const [hiddenSummaryWidgets, setHiddenSummaryWidgets] = useState<SummaryWidgetId[]>([]);
+
+  useEffect(() => {
+    const prefs = loadSummaryWidgetPrefs();
+    setSummaryWidgetOrder(prefs.order);
+    setHiddenSummaryWidgets(prefs.hidden);
+  }, []);
+
+  useEffect(() => {
+    saveSummaryWidgetPrefs(summaryWidgetOrder, hiddenSummaryWidgets);
+  }, [hiddenSummaryWidgets, summaryWidgetOrder]);
+
+  const hiddenSummaryWidgetSet = useMemo(
+    () => new Set<SummaryWidgetId>(hiddenSummaryWidgets),
+    [hiddenSummaryWidgets],
+  );
+  const widgetOrderIndexMap = useMemo(
+    () =>
+      new Map(
+        summaryWidgetOrder.map((widgetId, index) => [widgetId, index] as const),
+      ),
+    [summaryWidgetOrder],
+  );
+  const visibleSummaryWidgets = useMemo(
+    () => summaryWidgetOrder.filter((widgetId) => !hiddenSummaryWidgetSet.has(widgetId)),
+    [hiddenSummaryWidgetSet, summaryWidgetOrder],
   );
 
   const selectedAccount =
@@ -519,6 +592,144 @@ export default function FinanceApp() {
     setImportMessage('Action plan complete. Keep importing and reviewing weekly.');
   }
 
+  function moveSummaryWidget(widgetId: SummaryWidgetId, direction: -1 | 1) {
+    setSummaryWidgetOrder((currentOrder) => {
+      const currentIndex = currentOrder.indexOf(widgetId);
+      if (currentIndex < 0) {
+        return currentOrder;
+      }
+      const nextIndex = currentIndex + direction;
+      if (nextIndex < 0 || nextIndex >= currentOrder.length) {
+        return currentOrder;
+      }
+      const nextOrder = [...currentOrder];
+      const [moved] = nextOrder.splice(currentIndex, 1);
+      nextOrder.splice(nextIndex, 0, moved);
+      return nextOrder;
+    });
+  }
+
+  function toggleSummaryWidget(widgetId: SummaryWidgetId) {
+    setHiddenSummaryWidgets((currentHidden) =>
+      currentHidden.includes(widgetId)
+        ? currentHidden.filter((id) => id !== widgetId)
+        : [...currentHidden, widgetId],
+    );
+  }
+
+  function renderSummaryTile(widgetId: SummaryWidgetId) {
+    switch (widgetId) {
+      case 'liquid-cash':
+        return (
+          <SummaryTile
+            key={widgetId}
+            label="Liquid cash"
+            value={formatCurrency(summary.liquidCash)}
+            detail="Checking, savings & cash"
+            tone="positive"
+          />
+        );
+      case 'month-income':
+        return (
+          <SummaryTile
+            key={widgetId}
+            label="Month income"
+            value={formatCurrency(summary.monthIncome)}
+            detail="Income this month"
+            tone="positive"
+          />
+        );
+      case 'month-spend':
+        return (
+          <SummaryTile
+            key={widgetId}
+            label="Month spend"
+            value={formatCurrency(summary.monthSpend)}
+            detail="Expenses this month"
+            tone="alert"
+          />
+        );
+      case 'savings-rate':
+        return (
+          <SummaryTile
+            key={widgetId}
+            label="Savings rate"
+            value={savingsRate > 0 ? `${savingsRate}%` : '—'}
+            detail={savingsRate > 0 ? 'Of income kept this month' : 'Import income to calculate'}
+            tone={savingsRate >= 20 ? 'positive' : 'neutral'}
+          />
+        );
+      case 'budget-health':
+        return (
+          <SummaryTile
+            key={widgetId}
+            label="Budget health"
+            value={budgetHealthScore != null ? `${budgetHealthScore}%` : '—'}
+            detail={budgetHealthScore != null ? 'Budgets on track this month' : 'Set budgets below to track'}
+            tone={
+              budgetHealthScore != null && budgetHealthScore >= 70
+                ? 'positive'
+                : budgetHealthScore != null
+                  ? 'alert'
+                  : 'neutral'
+            }
+          />
+        );
+      case 'unreviewed':
+        return (
+          <SummaryTile
+            key={widgetId}
+            label="Unreviewed"
+            value={`${summary.unreviewedCount}`}
+            detail="Transactions to review"
+            tone={summary.unreviewedCount > 0 ? 'alert' : 'neutral'}
+          />
+        );
+      case 'safe-to-spend':
+        return (
+          <SummaryTile
+            key={widgetId}
+            label="Safe to spend"
+            value={formatCurrency(guidance.safeToSpend)}
+            detail="After 20% savings target"
+            tone={guidance.safeToSpend >= 0 ? 'positive' : 'alert'}
+          />
+        );
+      case 'projected-month-end':
+        return (
+          <SummaryTile
+            key={widgetId}
+            label="Projected month-end"
+            value={formatCurrency(guidance.projectedMonthEndNet)}
+            detail={`Pace ${formatCurrency(guidance.averageDailySpend)}/day`}
+            tone={guidance.projectedMonthEndNet >= 0 ? 'positive' : 'alert'}
+          />
+        );
+      case 'recurring-burn':
+        return (
+          <SummaryTile
+            key={widgetId}
+            label="Recurring burn"
+            value={formatCurrency(guidance.monthlySubscriptionBurn)}
+            detail="Estimated subscription spend"
+            tone="neutral"
+          />
+        );
+      case 'review-completion':
+        return (
+          <SummaryTile
+            key={widgetId}
+            label="Review completion"
+            value={`${guidance.reviewCompletionPct}%`}
+            detail="Transactions reviewed this month"
+            tone={guidance.reviewCompletionPct >= 80 ? 'positive' : 'neutral'}
+          />
+        );
+      default:
+        return null;
+    }
+  }
+
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingShell}>
@@ -564,23 +775,66 @@ export default function FinanceApp() {
         </View>
 
         <View style={styles.summaryGrid}>
-          <SummaryTile label="Liquid cash" value={formatCurrency(summary.liquidCash)} detail="Checking, savings & cash" tone="positive" />
-          <SummaryTile label="Month income" value={formatCurrency(summary.monthIncome)} detail="Income this month" tone="positive" />
-          <SummaryTile label="Month spend" value={formatCurrency(summary.monthSpend)} detail="Expenses this month" tone="alert" />
-          <SummaryTile
-            label="Savings rate"
-            value={savingsRate > 0 ? `${savingsRate}%` : '—'}
-            detail={savingsRate > 0 ? 'Of income kept this month' : 'Import income to calculate'}
-            tone={savingsRate >= 20 ? 'positive' : savingsRate > 0 ? 'neutral' : 'neutral'}
-          />
-          <SummaryTile
-            label="Budget health"
-            value={budgetHealthScore != null ? `${budgetHealthScore}%` : '—'}
-            detail={budgetHealthScore != null ? 'Budgets on track this month' : 'Set budgets below to track'}
-            tone={budgetHealthScore != null && budgetHealthScore >= 70 ? 'positive' : budgetHealthScore != null ? 'alert' : 'neutral'}
-          />
-          <SummaryTile label="Unreviewed" value={`${summary.unreviewedCount}`} detail="Transactions to review" tone={summary.unreviewedCount > 0 ? 'alert' : 'neutral'} />
+          {visibleSummaryWidgets.map((widgetId) => renderSummaryTile(widgetId))}
         </View>
+
+        <FinanceCard title="Dashboard layout" eyebrow="Customize cards">
+          <Text style={styles.bodyText}>
+            Show or hide summary cards and reorder them so the top of your dashboard reflects what
+            you watch most.
+          </Text>
+          <View style={styles.layoutList}>
+            {summaryWidgetOrder.map((widgetId) => {
+              const index = widgetOrderIndexMap.get(widgetId) ?? 0;
+              const canMoveUp = index > 0;
+              const canMoveDown = index < summaryWidgetOrder.length - 1;
+              const isVisible = !hiddenSummaryWidgetSet.has(widgetId);
+              return (
+                <View key={widgetId} style={styles.layoutRow}>
+                  <View style={styles.layoutCopy}>
+                    <Text style={styles.layoutName}>{SUMMARY_WIDGET_LABELS[widgetId]}</Text>
+                    <Text style={styles.layoutMeta}>
+                      {isVisible ? 'Visible on dashboard' : 'Hidden from dashboard'}
+                    </Text>
+                  </View>
+                  <View style={styles.layoutActions}>
+                    <Pressable
+                      style={[
+                        styles.layoutActionButton,
+                        !canMoveUp && styles.layoutActionButtonDisabled,
+                      ]}
+                      onPress={() => moveSummaryWidget(widgetId, -1)}
+                      disabled={!canMoveUp}
+                    >
+                      <Text style={styles.layoutActionButtonText}>↑</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[
+                        styles.layoutActionButton,
+                        !canMoveDown && styles.layoutActionButtonDisabled,
+                      ]}
+                      onPress={() => moveSummaryWidget(widgetId, 1)}
+                      disabled={!canMoveDown}
+                    >
+                      <Text style={styles.layoutActionButtonText}>↓</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[
+                        styles.layoutToggleButton,
+                        isVisible && styles.layoutToggleButtonActive,
+                      ]}
+                      onPress={() => toggleSummaryWidget(widgetId)}
+                    >
+                      <Text style={styles.layoutToggleButtonText}>
+                        {isVisible ? 'Visible' : 'Hidden'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        </FinanceCard>
 
         <FinanceCard title="Action plan" eyebrow="What to do next" tone="accent">
           <Text style={styles.bodyText}>
@@ -656,6 +910,72 @@ export default function FinanceApp() {
                 </View>
               );
             })}
+          </View>
+        </FinanceCard>
+
+        <FinanceCard title="Month review" eyebrow="Compared to last month">
+          <Text style={styles.bodyText}>
+            Catch trend changes early so you can adjust now instead of waiting for month-end.
+          </Text>
+          <View style={styles.reviewGrid}>
+            <View style={styles.reviewMetric}>
+              <Text style={styles.reviewMetricLabel}>Spend vs last month</Text>
+              <Text
+                style={[
+                  styles.reviewMetricValue,
+                  monthDeltaPct > 0 ? styles.reviewMetricValueDanger : styles.reviewMetricValuePositive,
+                ]}
+              >
+                {monthDeltaPct >= 0 ? '+' : ''}
+                {monthDeltaPct}%
+              </Text>
+              <Text style={styles.reviewMetricDetail}>
+                {formatCurrency(summary.monthSpend)} now vs {formatCurrency(previousMonthSpend)} prior
+                month
+              </Text>
+            </View>
+            <View style={styles.reviewMetric}>
+              <Text style={styles.reviewMetricLabel}>Top spend category</Text>
+              <Text style={styles.reviewMetricValue}>{topCategoryNow?.category ?? '—'}</Text>
+              <Text style={styles.reviewMetricDetail}>
+                {topCategoryNow
+                  ? formatCurrency(topCategoryNow.total)
+                  : 'Import more data to compare category trends'}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.reviewList}>
+            {monthReviewRows.length ? (
+              monthReviewRows.map((row) => (
+                <View key={row.category} style={styles.reviewRow}>
+                  <View style={styles.reviewRowCopy}>
+                    <Text style={styles.reviewRowCategory}>
+                      {getCategoryIcon(row.category)} {row.category}
+                    </Text>
+                    <Text style={styles.reviewRowDetail}>
+                      {formatCurrency(row.current)} this month · {formatCurrency(row.previous)} last
+                      month
+                    </Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.reviewRowChange,
+                      row.deltaPct > 0 ? styles.reviewRowChangeDanger : styles.reviewRowChangePositive,
+                    ]}
+                  >
+                    {row.deltaPct >= 0 ? '+' : ''}
+                    {row.deltaPct}%
+                  </Text>
+                </View>
+              ))
+            ) : (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyTitle}>Not enough history yet</Text>
+                <Text style={styles.emptyBody}>
+                  Import at least two months of transactions to unlock month-over-month review.
+                </Text>
+              </View>
+            )}
           </View>
         </FinanceCard>
 
@@ -1892,6 +2212,153 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  reviewGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  reviewMetric: {
+    flexGrow: 1,
+    flexBasis: 0,
+    minWidth: 180,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#2b454f',
+    backgroundColor: '#0d1f26',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  reviewMetricLabel: {
+    color: palette.accentSoft,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+  },
+  reviewMetricValue: {
+    color: palette.text,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  reviewMetricValuePositive: {
+    color: palette.positive,
+  },
+  reviewMetricValueDanger: {
+    color: palette.danger,
+  },
+  reviewMetricDetail: {
+    color: palette.muted,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  reviewList: {
+    gap: 8,
+  },
+  reviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#1f3841',
+    paddingTop: 10,
+  },
+  reviewRowCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  reviewRowCategory: {
+    color: palette.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  reviewRowDetail: {
+    color: palette.muted,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  reviewRowChange: {
+    fontSize: 12,
+    fontWeight: '800',
+    flexShrink: 0,
+  },
+  reviewRowChangePositive: {
+    color: palette.positive,
+  },
+  reviewRowChangeDanger: {
+    color: palette.danger,
+  },
+  layoutList: {
+    gap: 10,
+  },
+  layoutRow: {
+    borderTopWidth: 1,
+    borderTopColor: '#1f3841',
+    paddingTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  layoutCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  layoutName: {
+    color: palette.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  layoutMeta: {
+    color: palette.muted,
+    fontSize: 11,
+  },
+  layoutActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  layoutActionButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#436972',
+    backgroundColor: '#12313a',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  layoutActionButtonDisabled: {
+    opacity: 0.35,
+  },
+  layoutActionButtonText: {
+    color: '#dce9e5',
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 16,
+  },
+  layoutToggleButton: {
+    minHeight: 32,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#3a5e67',
+    backgroundColor: '#10242b',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  layoutToggleButtonActive: {
+    borderColor: '#5b8d7b',
+    backgroundColor: '#163328',
+  },
+  layoutToggleButtonText: {
+    color: '#dce9e5',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
   },
 
   // ── Analytics ──────────────────────────────────────────────────────────────
