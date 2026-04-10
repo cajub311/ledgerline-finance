@@ -1,4 +1,5 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { formatDateShort } from '../../utils/format';
 
 export function TransactionRow({
   merchant,
@@ -43,7 +44,7 @@ export function TransactionRow({
       <View style={styles.copy}>
         <Text style={styles.merchant} numberOfLines={1}>{merchant}</Text>
         <Text style={styles.meta}>
-          {date}
+          {formatDateShort(date)}
           {'  ·  '}
           {category}
         </Text>

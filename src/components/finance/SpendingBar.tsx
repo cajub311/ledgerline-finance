@@ -1,4 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native';
+import { formatCurrencyCompact } from '../../utils/format';
 
 const CATEGORY_COLORS: Record<string, string> = {
   Housing: '#d97e68',
@@ -47,13 +48,13 @@ export function SpendingBar({
         <View style={styles.track}>
           <View style={[styles.bar, { width: barWidth, backgroundColor: color }]} />
         </View>
-        <Text style={styles.amount}>${amount.toFixed(0)}</Text>
+        <Text style={styles.amount}>{formatCurrencyCompact(amount)}</Text>
         <View style={styles.pctChip}>
           <Text style={styles.pctText}>{Math.round(pct * 100)}%</Text>
         </View>
       </View>
       {pace != null && pace > 0 ? (
-        <Text style={styles.pace}>On pace for ${Math.round(pace)}/mo</Text>
+        <Text style={styles.pace}>On pace for {formatCurrencyCompact(pace)}/mo</Text>
       ) : null}
     </View>
   );

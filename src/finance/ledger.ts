@@ -233,6 +233,37 @@ export function updateTransactionCategory(
   };
 }
 
+export interface TransactionEdits {
+  payee?: string;
+  amount?: number;
+  date?: string;
+  category?: string;
+  notes?: string;
+}
+
+/** Apply an arbitrary set of field edits to a single transaction. */
+export function editTransaction(
+  state: FinanceState,
+  transactionId: string,
+  edits: TransactionEdits,
+): FinanceState {
+  return {
+    ...state,
+    transactions: state.transactions.map((transaction) =>
+      transaction.id === transactionId
+        ? {
+            ...transaction,
+            ...(edits.payee !== undefined && edits.payee.trim() ? { payee: edits.payee.trim() } : {}),
+            ...(edits.amount !== undefined && Number.isFinite(edits.amount) ? { amount: edits.amount } : {}),
+            ...(edits.date !== undefined && edits.date.trim() ? { date: edits.date.trim() } : {}),
+            ...(edits.category !== undefined && edits.category.trim() ? { category: normalizeCategory(edits.category.trim(), transaction.payee) } : {}),
+            ...(edits.notes !== undefined ? { notes: edits.notes.trim() || undefined } : {}),
+          }
+        : transaction,
+    ),
+  };
+}
+
 function mapImportedRowToTransaction(
   row: ParsedStatementRow,
   accountId: string,
