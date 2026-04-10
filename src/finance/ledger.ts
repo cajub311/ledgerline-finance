@@ -264,6 +264,14 @@ export function editTransaction(
   };
 }
 
+/** Remove a single transaction from the ledger. */
+export function deleteTransaction(state: FinanceState, transactionId: string): FinanceState {
+  return {
+    ...state,
+    transactions: state.transactions.filter((t) => t.id !== transactionId),
+  };
+}
+
 function mapImportedRowToTransaction(
   row: ParsedStatementRow,
   accountId: string,
