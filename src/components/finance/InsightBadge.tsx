@@ -2,36 +2,38 @@ import { StyleSheet, Text, View } from 'react-native';
 
 export function InsightBadge({ text, index }: { text: string; index: number }) {
   const colors = ['#d4e37d', '#8fd3b4', '#94bdc4', '#f0bd82', '#b39ddb', '#80cbc4'];
-  const dotColor = colors[index % colors.length];
+  const accentColor = colors[index % colors.length];
 
   return (
-    <View style={styles.row}>
-      <View style={[styles.dot, { backgroundColor: dotColor }]} />
+    <View style={styles.card}>
+      {/* Colored left accent line */}
+      <View style={[styles.leftAccent, { backgroundColor: accentColor }]} />
       <Text style={styles.text}>{text}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  row: {
+  card: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    paddingVertical: 6,
-    borderTopWidth: 1,
-    borderTopColor: '#1e3840',
+    alignItems: 'stretch',
+    gap: 12,
+    backgroundColor: '#0f1d24',
+    borderWidth: 1,
+    borderColor: '#1e3840',
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
   },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginTop: 4,
+  leftAccent: {
+    width: 3,
+    borderRadius: 2,
     flexShrink: 0,
   },
   text: {
     flex: 1,
     color: '#d5e9e5',
     fontSize: 13,
-    lineHeight: 19,
+    lineHeight: 20,
   },
 });

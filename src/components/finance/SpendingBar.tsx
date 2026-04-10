@@ -44,22 +44,24 @@ export function SpendingBar({
         <Text style={styles.label} numberOfLines={1}>
           {category}
         </Text>
-      <View style={styles.track}>
-        <View style={[styles.bar, { width: barWidth, backgroundColor: color }]} />
+        <View style={styles.track}>
+          <View style={[styles.bar, { width: barWidth, backgroundColor: color }]} />
+        </View>
+        <Text style={styles.amount}>${amount.toFixed(0)}</Text>
+        <View style={styles.pctChip}>
+          <Text style={styles.pctText}>{Math.round(pct * 100)}%</Text>
+        </View>
       </View>
-      <Text style={styles.amount}>${amount.toFixed(0)}</Text>
-      <Text style={styles.pct}>{Math.round(pct * 100)}%</Text>
-    </View>
-    {pace != null && pace > 0 ? (
-      <Text style={styles.pace}>On pace for ${Math.round(pace)}/mo</Text>
-    ) : null}
+      {pace != null && pace > 0 ? (
+        <Text style={styles.pace}>On pace for ${Math.round(pace)}/mo</Text>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   wrapper: {
-    gap: 2,
+    gap: 3,
   },
   row: {
     flexDirection: 'row',
@@ -68,47 +70,55 @@ const styles = StyleSheet.create({
     minHeight: 28,
   },
   icon: {
-    fontSize: 13,
-    width: 18,
+    fontSize: 15,
+    width: 20,
     textAlign: 'center',
     flexShrink: 0,
   },
   label: {
     color: '#eff7f4',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
-    width: 82,
+    width: 90,
     flexShrink: 0,
   },
   track: {
     flex: 1,
-    height: 10,
-    backgroundColor: '#1a3540',
-    borderRadius: 6,
+    height: 12,
+    backgroundColor: '#0d1e26',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#1a3540',
     overflow: 'hidden',
   },
   bar: {
     height: '100%',
-    borderRadius: 6,
+    borderRadius: 8,
   },
   amount: {
     color: '#eff7f4',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
-    width: 44,
+    width: 48,
     textAlign: 'right',
     flexShrink: 0,
   },
-  pct: {
+  pctChip: {
+    backgroundColor: '#0d1e26',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    flexShrink: 0,
+  },
+  pctText: {
     color: '#94bdc4',
     fontSize: 11,
-    width: 30,
-    textAlign: 'right',
-    flexShrink: 0,
+    fontWeight: '600',
   },
   pace: {
-    color: '#5c8c96',
+    color: '#4d8090',
     fontSize: 10,
-    marginLeft: 26,
+    fontStyle: 'italic',
+    marginLeft: 28,
   },
 });

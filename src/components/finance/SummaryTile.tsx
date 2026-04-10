@@ -11,6 +11,9 @@ export function SummaryTile({
   detail?: string;
   tone?: 'neutral' | 'positive' | 'alert';
 }) {
+  const accentColor =
+    tone === 'positive' ? '#8fd3b4' : tone === 'alert' ? '#d97e68' : '#4d8390';
+
   return (
     <View
       style={[
@@ -19,9 +22,14 @@ export function SummaryTile({
         tone === 'alert' && styles.tileAlert,
       ]}
     >
-      <Text style={styles.label}>{label}</Text>
-      <Text style={styles.value}>{value}</Text>
-      {detail ? <Text style={styles.detail}>{detail}</Text> : null}
+      {/* Colored left border accent */}
+      <View style={[styles.leftAccent, { backgroundColor: accentColor }]} />
+
+      <View style={styles.content}>
+        <Text style={styles.label}>{label}</Text>
+        <Text style={styles.value}>{value}</Text>
+        {detail ? <Text style={styles.detail}>{detail}</Text> : null}
+      </View>
     </View>
   );
 }
@@ -30,36 +38,50 @@ const styles = StyleSheet.create({
   tile: {
     flex: 1,
     minWidth: 132,
-    backgroundColor: '#0b171c',
+    backgroundColor: '#0f1d24',
     borderWidth: 1,
     borderColor: '#20353d',
-    borderRadius: 18,
-    padding: 12,
-    gap: 6,
+    borderRadius: 20,
+    padding: 14,
+    flexDirection: 'row',
+    gap: 12,
+    overflow: 'hidden',
   },
   tilePositive: {
-    borderColor: '#2f7d68',
-    backgroundColor: '#112920',
+    borderColor: '#1e4d3d',
+    backgroundColor: '#0a1e18',
   },
   tileAlert: {
-    borderColor: '#8b6247',
-    backgroundColor: '#2a2019',
+    borderColor: '#4a2e1e',
+    backgroundColor: '#160e09',
+  },
+  leftAccent: {
+    width: 3,
+    borderRadius: 2,
+    alignSelf: 'stretch',
+    flexShrink: 0,
+  },
+  content: {
+    flex: 1,
+    gap: 5,
   },
   label: {
-    color: '#90b4be',
-    fontSize: 11,
+    color: '#b9ccd0',
+    fontSize: 10,
     fontWeight: '700',
     textTransform: 'uppercase',
-    letterSpacing: 0.8,
+    letterSpacing: 1.2,
   },
   value: {
-    color: '#eff6f3',
-    fontSize: 22,
-    fontWeight: '800',
+    color: '#eff7f4',
+    fontSize: 24,
+    fontWeight: '900',
+    lineHeight: 28,
   },
   detail: {
-    color: '#b9cccf',
-    fontSize: 12,
-    lineHeight: 16,
+    color: '#b9ccd0',
+    fontSize: 11,
+    fontStyle: 'italic',
+    lineHeight: 15,
   },
 });
