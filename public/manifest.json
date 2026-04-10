@@ -1,12 +1,13 @@
 {
   "name": "Ledgerline Finance",
   "short_name": "Ledgerline",
-  "description": "Your personal finance command center — import statements, track spending, set budgets, and hit your savings goals.",
+  "description": "Personal finance command center — import bank statements, track spending, set budgets, and hit your savings goals. Everything stays on your device.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#071218",
-  "theme_color": "#071218",
+  "theme_color": "#0f1b21",
   "orientation": "portrait-primary",
+  "categories": ["finance", "productivity"],
   "icons": [
     {
       "src": "/favicon.ico",
