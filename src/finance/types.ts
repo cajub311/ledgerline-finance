@@ -110,6 +110,28 @@ export interface MonthlyTrendItem {
   spend: number;
 }
 
+export interface CashFlowForecastPoint {
+  date: string;
+  label: string;
+  projectedBalance: number;
+  recurringDelta: number;
+  baselineDelta: number;
+}
+
+export interface CashFlowForecast {
+  horizonDays: number;
+  threshold: number;
+  baselineDailyNet: number;
+  recurringIncomeMonthly: number;
+  recurringExpenseMonthly: number;
+  projectedEndBalance: number;
+  startingBalance: number;
+  minProjectedBalance: number;
+  maxProjectedBalance: number;
+  lowBalanceDates: string[];
+  points: CashFlowForecastPoint[];
+}
+
 export interface TopMerchantItem {
   payee: string;
   total: number;
@@ -161,3 +183,4 @@ export interface GuidanceSnapshot {
   reviewCompletionPct: number;
   steps: GuidanceStep[];
 }
+

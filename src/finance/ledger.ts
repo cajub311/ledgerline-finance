@@ -4,6 +4,7 @@ import type {
   Budget,
   BudgetStatus,
   CategoryBreakdownItem,
+  CashFlowForecastPoint,
   DetectedSubscription,
   FinanceAccount,
   FinancialGoal,
@@ -18,6 +19,7 @@ import type {
   MonthlyTrendItem,
   ParsedStatementBatch,
   ParsedStatementRow,
+  CashFlowForecast,
   TopMerchantItem,
 } from './types';
 
@@ -948,4 +950,203 @@ export function generateInsights(state: FinanceState): string[] {
   }
 
   return insights.slice(0, 6);
+}
+
+type RecurringSeries = {
+  cadenceDays: number;
+  dayInCycle: number;
+  avgAmount: number;
+  confidence: number;
+};
+
+function toDateOnly(dateLike: Date): Date {
+  return new Date(dateLike.getFullYear(), dateLike.getMonth(), dateLike.getDate());
+}
+
+function addDays(dateLike: Date, days: number): Date {
+  const d = new Date(dateLike);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function daysBetweenIso(leftIso: string, rightIso: string): number {
+  const left = new Date(`${leftIso}T00:00:00.000Z`).getTime();
+  const right = new Date(`${rightIso}T00:00:00.000Z`).getTime();
+  return Math.round((right - left) / (1000 * 60 * 60 * 24));
+}
+
+function average(values: number[]): number {
+  if (values.length === 0) {
+    return 0;
+  }
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function detectRecurringSeries(transactions: FinanceTransaction[]): RecurringSeries[] {
+  const byPayee: Record<string, FinanceTransaction[]> = {};
+  for (const transaction of transactions) {
+    const payeeKey = transaction.payee.trim().toLowerCase();
+    if (!byPayee[payeeKey]) {
+      byPayee[payeeKey] = [];
+    }
+    byPayee[payeeKey].push(transaction);
+  }
+
+  const recurring: RecurringSeries[] = [];
+
+  for (const txs of Object.values(byPayee)) {
+    if (txs.length < 2) {
+      continue;
+    }
+
+    const sorted = [...txs].sort((left, right) => left.date.localeCompare(right.date));
+    const amounts = sorted.map((transaction) => transaction.amount);
+    const amountAbs = amounts.map((amount) => Math.abs(amount));
+    const avgAbs = average(amountAbs);
+    if (avgAbs <= 0) {
+      continue;
+    }
+
+    const amountVarianceRatio =
+      average(amountAbs.map((amount) => Math.abs(amount - avgAbs))) / avgAbs;
+    if (amountVarianceRatio > 0.25) {
+      continue;
+    }
+
+    const gaps: number[] = [];
+    for (let index = 1; index < sorted.length; index += 1) {
+      const gap = daysBetweenIso(sorted[index - 1].date, sorted[index].date);
+      if (gap > 0) {
+        gaps.push(gap);
+      }
+    }
+
+    if (gaps.length === 0) {
+      continue;
+    }
+
+    const avgGap = average(gaps);
+    const avgGapError = average(gaps.map((gap) => Math.abs(gap - avgGap)));
+
+    let cadenceDays = 0;
+    if (avgGap >= 5 && avgGap <= 10 && avgGapError <= 2.5) {
+      cadenceDays = 7;
+    } else if (avgGap >= 12 && avgGap <= 18 && avgGapError <= 4) {
+      cadenceDays = 14;
+    } else if (avgGap >= 24 && avgGap <= 35 && avgGapError <= 6) {
+      cadenceDays = 30;
+    } else {
+      continue;
+    }
+
+    const lastDate = new Date(`${sorted[sorted.length - 1].date}T00:00:00.000Z`);
+    const cycleStart = Math.floor(lastDate.getTime() / (1000 * 60 * 60 * 24));
+    const dayInCycle = ((cycleStart % cadenceDays) + cadenceDays) % cadenceDays;
+    const confidence = Number(Math.max(0, 1 - amountVarianceRatio - avgGapError / cadenceDays).toFixed(2));
+
+    recurring.push({
+      cadenceDays,
+      dayInCycle,
+      avgAmount: Number(average(amounts).toFixed(2)),
+      confidence,
+    });
+  }
+
+  return recurring;
+}
+
+export function getCashFlowForecast(
+  state: FinanceState,
+  horizonDays: 30 | 60 | 90,
+  lowBalanceThreshold: number,
+  now = new Date(),
+): CashFlowForecast {
+  const balances = getAccountBalances(state);
+  const startingBalance = Number(
+    balances
+      .filter((account) => accountTypeIsLiquid(account.type))
+      .reduce((sum, account) => sum + account.currentBalance, 0)
+      .toFixed(2),
+  );
+
+  const recentCutoff = addDays(toDateOnly(now), -180);
+  const recentTransactions = state.transactions.filter(
+    (transaction) => new Date(`${transaction.date}T00:00:00.000Z`) >= recentCutoff,
+  );
+
+  const recurring = detectRecurringSeries(recentTransactions);
+  const projectedPoints: CashFlowForecast['points'] = [];
+  const lowBalanceDates: string[] = [];
+
+  let runningBalance = startingBalance;
+  let baselineBalance = startingBalance;
+  const baselineDailyNet =
+    recentTransactions.length > 0
+      ? recentTransactions.reduce((sum, transaction) => sum + transaction.amount, 0) / 180
+      : 0;
+  projectedPoints.push({
+    date: toDateOnly(now).toISOString().slice(0, 10),
+    label: 'Today',
+    projectedBalance: Number(runningBalance.toFixed(2)),
+    recurringDelta: 0,
+    baselineDelta: 0,
+  });
+
+  for (let dayOffset = 1; dayOffset <= horizonDays; dayOffset += 1) {
+    const d = addDays(toDateOnly(now), dayOffset);
+    const dayStamp = Math.floor(d.getTime() / (1000 * 60 * 60 * 24));
+    const expectedDelta = recurring.reduce((sum, series) => {
+      const matchesCycle = ((dayStamp % series.cadenceDays) + series.cadenceDays) % series.cadenceDays === series.dayInCycle;
+      if (!matchesCycle) {
+        return sum;
+      }
+      return sum + series.avgAmount * Math.max(0.35, series.confidence);
+    }, 0);
+
+    const baselineDelta = Number(baselineDailyNet.toFixed(2));
+    runningBalance = Number((runningBalance + expectedDelta + baselineDelta).toFixed(2));
+    baselineBalance = Number((baselineBalance + baselineDelta).toFixed(2));
+    const isoDate = d.toISOString().slice(0, 10);
+    projectedPoints.push({
+      date: isoDate,
+      label: dayOffset % 7 === 0 ? d.toLocaleString('default', { month: 'short', day: 'numeric' }) : '',
+      projectedBalance: runningBalance,
+      recurringDelta: Number(expectedDelta.toFixed(2)),
+      baselineDelta,
+    });
+
+    if (runningBalance < lowBalanceThreshold) {
+      lowBalanceDates.push(isoDate);
+    }
+  }
+
+  const minBalance = projectedPoints.reduce(
+    (min, point) => Math.min(min, point.projectedBalance),
+    Number.POSITIVE_INFINITY,
+  );
+  const maxBalance = projectedPoints.reduce(
+    (max, point) => Math.max(max, point.projectedBalance),
+    Number.NEGATIVE_INFINITY,
+  );
+
+  const recurringIncomeMonthly = recurring
+    .filter((series) => series.avgAmount > 0)
+    .reduce((sum, series) => sum + (series.avgAmount * 30) / series.cadenceDays, 0);
+  const recurringExpenseMonthly = recurring
+    .filter((series) => series.avgAmount < 0)
+    .reduce((sum, series) => sum + (Math.abs(series.avgAmount) * 30) / series.cadenceDays, 0);
+
+  return {
+    horizonDays,
+    threshold: Number(lowBalanceThreshold.toFixed(2)),
+    baselineDailyNet: Number(baselineDailyNet.toFixed(2)),
+    recurringIncomeMonthly: Number(recurringIncomeMonthly.toFixed(2)),
+    recurringExpenseMonthly: Number(recurringExpenseMonthly.toFixed(2)),
+    projectedEndBalance: Number(runningBalance.toFixed(2)),
+    startingBalance: Number(startingBalance.toFixed(2)),
+    minProjectedBalance: Number(minBalance.toFixed(2)),
+    maxProjectedBalance: Number(maxBalance.toFixed(2)),
+    lowBalanceDates,
+    points: projectedPoints,
+  };
 }

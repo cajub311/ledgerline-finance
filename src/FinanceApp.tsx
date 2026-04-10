@@ -36,6 +36,7 @@ import {
   getGuidanceSnapshot,
   getGoalStats,
   getLatestTransactions,
+  getCashFlowForecast,
   getMonthlyTrend,
   getSavingsRate,
   getTopMerchants,
@@ -54,6 +55,7 @@ import {
   updateTransactionCategory,
   type GuidanceCta,
   type FinanceState,
+  type CashFlowForecast,
   type SummaryWidgetId,
   parseFinanceBackupJson,
   serializeFinanceState,
@@ -116,6 +118,8 @@ export default function FinanceApp() {
   const [goalDate, setGoalDate] = useState('');
   const [goalEditId, setGoalEditId] = useState<string | null>(null);
   const [goalEditValue, setGoalEditValue] = useState('');
+  const [forecastHorizon, setForecastHorizon] = useState<30 | 60 | 90>(30);
+  const [forecastThresholdInput, setForecastThresholdInput] = useState('1000');
 
   useEffect(() => {
     let mounted = true;
@@ -240,6 +244,18 @@ export default function FinanceApp() {
   const maxMonthlySpend = useMemo(
     () => Math.max(...monthlyTrend.map((m) => m.spend), 1),
     [monthlyTrend],
+  );
+  const forecastThreshold = useMemo(() => {
+    const parsed = Number.parseFloat(forecastThresholdInput);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }, [forecastThresholdInput]);
+  const forecast = useMemo<CashFlowForecast>(
+    () => getCashFlowForecast(state, forecastHorizon, forecastThreshold),
+    [forecastHorizon, forecastThreshold, state],
+  );
+  const forecastRange = useMemo(
+    () => Math.max(forecast.maxProjectedBalance - forecast.minProjectedBalance, 1),
+    [forecast.maxProjectedBalance, forecast.minProjectedBalance],
   );
 
   const [summaryWidgetOrder, setSummaryWidgetOrder] = useState<SummaryWidgetId[]>(() => [
@@ -730,6 +746,17 @@ export default function FinanceApp() {
     }
   }
 
+  function formatAxisCurrency(value: number): string {
+    const abs = Math.abs(value);
+    if (abs >= 1_000_000) {
+      return `${value < 0 ? '-' : ''}$${(abs / 1_000_000).toFixed(1)}M`;
+    }
+    if (abs >= 1_000) {
+      return `${value < 0 ? '-' : ''}$${(abs / 1_000).toFixed(1)}k`;
+    }
+    return `${value < 0 ? '-' : ''}$${Math.round(abs)}`;
+  }
+
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingShell}>
@@ -977,6 +1004,124 @@ export default function FinanceApp() {
               </View>
             )}
           </View>
+        </FinanceCard>
+
+        <FinanceCard title="Cash flow forecast" eyebrow="30 / 60 / 90 day projection">
+          <Text style={styles.bodyText}>
+            Projects your liquid balance using historical recurring income and expenses, then flags
+            dates where you may drop below your threshold.
+          </Text>
+          <View style={styles.forecastControls}>
+            <View style={styles.forecastHorizonRow}>
+              {[30, 60, 90].map((days) => {
+                const active = forecastHorizon === days;
+                return (
+                  <Pressable
+                    key={`forecast-h-${days}`}
+                    style={[styles.forecastHorizonButton, active && styles.forecastHorizonButtonActive]}
+                    onPress={() => setForecastHorizon(days as 30 | 60 | 90)}
+                  >
+                    <Text
+                      style={[
+                        styles.forecastHorizonButtonText,
+                        active && styles.forecastHorizonButtonTextActive,
+                      ]}
+                    >
+                      {days}d
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={styles.forecastThresholdWrap}>
+              <Text style={styles.forecastThresholdLabel}>Low-balance alert</Text>
+              <TextInput
+                style={styles.forecastThresholdInput}
+                value={forecastThresholdInput}
+                onChangeText={setForecastThresholdInput}
+                keyboardType="decimal-pad"
+                placeholder="1000"
+                placeholderTextColor="#7d9aa0"
+              />
+            </View>
+          </View>
+
+          <View style={styles.forecastKpiRow}>
+            <View style={styles.forecastKpiCard}>
+              <Text style={styles.forecastKpiLabel}>Now</Text>
+              <Text style={styles.forecastKpiValue}>{formatCurrency(forecast.startingBalance)}</Text>
+              <Text style={styles.forecastKpiDetail}>Liquid balance today</Text>
+            </View>
+            <View style={styles.forecastKpiCard}>
+              <Text style={styles.forecastKpiLabel}>Projected end</Text>
+              <Text
+                style={[
+                  styles.forecastKpiValue,
+                  forecast.projectedEndBalance >= forecast.threshold
+                    ? styles.forecastKpiPositive
+                    : styles.forecastKpiDanger,
+                ]}
+              >
+                {formatCurrency(forecast.projectedEndBalance)}
+              </Text>
+              <Text style={styles.forecastKpiDetail}>{forecast.horizonDays}-day estimate</Text>
+            </View>
+            <View style={styles.forecastKpiCard}>
+              <Text style={styles.forecastKpiLabel}>Monthly recurring</Text>
+              <Text style={styles.forecastKpiValue}>
+                +{formatCurrency(forecast.recurringIncomeMonthly)} / -
+                {formatCurrency(forecast.recurringExpenseMonthly)}
+              </Text>
+              <Text style={styles.forecastKpiDetail}>Detected recurring inflow/outflow</Text>
+            </View>
+          </View>
+
+          <View style={styles.forecastChart}>
+            {forecast.points.map((point) => {
+              const normalized =
+                forecastRange > 0
+                  ? (point.projectedBalance - forecast.minProjectedBalance) / forecastRange
+                  : 0.5;
+              const barHeight = Math.max(4, Math.round(normalized * 88));
+              const below = point.projectedBalance < forecast.threshold;
+              return (
+                <View key={point.date} style={styles.forecastColumn}>
+                  <View style={styles.forecastBarWrap}>
+                    <View
+                      style={[
+                        styles.forecastBar,
+                        { height: barHeight },
+                        below ? styles.forecastBarDanger : styles.forecastBarPositive,
+                      ]}
+                    />
+                  </View>
+                  {point.label ? <Text style={styles.forecastLabel}>{point.label}</Text> : <View style={styles.forecastLabelSpacer} />}
+                </View>
+              );
+            })}
+          </View>
+          <Text style={styles.forecastAxisText}>
+            Range: {formatAxisCurrency(forecast.minProjectedBalance)} to{' '}
+            {formatAxisCurrency(forecast.maxProjectedBalance)}
+          </Text>
+
+          {forecast.lowBalanceDates.length > 0 ? (
+            <View style={styles.forecastAlert}>
+              <Text style={styles.forecastAlertTitle}>Low-balance risk dates</Text>
+              <Text style={styles.forecastAlertBody}>
+                {forecast.lowBalanceDates.slice(0, 4).join(', ')}
+                {forecast.lowBalanceDates.length > 4
+                  ? ` (+${forecast.lowBalanceDates.length - 4} more)`
+                  : ''}
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.forecastAlertOk}>
+              <Text style={styles.forecastAlertOkText}>
+                No projected threshold breach in the next {forecast.horizonDays} days.
+              </Text>
+            </View>
+          )}
         </FinanceCard>
 
         {/* ── Spending Insights ─────────────────────────────────────── */}
@@ -2212,6 +2357,173 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  forecastControls: {
+    gap: 10,
+  },
+  forecastHorizonRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  forecastHorizonButton: {
+    minHeight: 32,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#3a5e67',
+    backgroundColor: '#10242b',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  forecastHorizonButtonActive: {
+    borderColor: '#5b8d7b',
+    backgroundColor: '#163328',
+  },
+  forecastHorizonButtonText: {
+    color: '#dce9e5',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  forecastHorizonButtonTextActive: {
+    color: '#eff7f4',
+  },
+  forecastThresholdWrap: {
+    gap: 6,
+  },
+  forecastThresholdLabel: {
+    color: palette.accentSoft,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+  },
+  forecastThresholdInput: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: palette.borderSoft,
+    backgroundColor: '#0b171c',
+    color: palette.text,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
+    maxWidth: 180,
+  },
+  forecastKpiRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  forecastKpiCard: {
+    flexGrow: 1,
+    flexBasis: 0,
+    minWidth: 160,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#2b454f',
+    backgroundColor: '#0d1f26',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  forecastKpiLabel: {
+    color: palette.accentSoft,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+  },
+  forecastKpiValue: {
+    color: palette.text,
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  forecastKpiDetail: {
+    color: palette.muted,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  forecastKpiPositive: {
+    color: palette.positive,
+  },
+  forecastKpiDanger: {
+    color: palette.danger,
+  },
+  forecastChart: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 2,
+    minHeight: 126,
+    paddingTop: 8,
+  },
+  forecastColumn: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+  },
+  forecastBarWrap: {
+    height: 96,
+    justifyContent: 'flex-end',
+    width: '100%',
+    alignItems: 'center',
+  },
+  forecastBar: {
+    width: '85%',
+    borderRadius: 3,
+    minHeight: 4,
+  },
+  forecastBarPositive: {
+    backgroundColor: '#3d7a8a',
+  },
+  forecastBarDanger: {
+    backgroundColor: palette.danger,
+  },
+  forecastLabel: {
+    color: palette.muted,
+    fontSize: 9,
+    textAlign: 'center',
+  },
+  forecastLabelSpacer: {
+    height: 12,
+  },
+  forecastAxisText: {
+    color: palette.muted,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  forecastAlert: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#5f3b34',
+    backgroundColor: '#2a1a18',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  forecastAlertTitle: {
+    color: '#f0bd82',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  forecastAlertBody: {
+    color: '#e5cbc3',
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  forecastAlertOk: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#2f7d68',
+    backgroundColor: '#112920',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  forecastAlertOkText: {
+    color: '#cfe9dd',
+    fontSize: 11,
+    lineHeight: 15,
   },
   reviewGrid: {
     flexDirection: 'row',

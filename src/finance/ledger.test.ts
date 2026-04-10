@@ -6,6 +6,7 @@ import {
   addManualTransaction,
   applyImportedBatch,
   createFinanceState,
+  getCashFlowForecast,
   getBudgetStatus,
   getFinanceSummary,
   getGuidanceSnapshot,
@@ -80,4 +81,17 @@ test('guidance snapshot computes action steps and pacing metrics', () => {
   assert.ok(snapshot.monthlySubscriptionBurn > 0);
   assert.ok(snapshot.projectedMonthEndSpend >= 0);
   assert.ok(snapshot.reviewCompletionPct <= 100);
+});
+
+test('cash flow forecast projects 30-day horizon and threshold alerts', () => {
+  const state = createFinanceState();
+  const forecast = getCashFlowForecast(state, 30, 1000, new Date('2026-04-10T12:00:00.000Z'));
+
+  assert.equal(forecast.horizonDays, 30);
+  assert.equal(forecast.points.length, 31);
+  assert.equal(forecast.points[0]?.label, 'Today');
+  assert.ok(Number.isFinite(forecast.projectedEndBalance));
+  assert.ok(forecast.maxProjectedBalance >= forecast.minProjectedBalance);
+  assert.ok(forecast.recurringIncomeMonthly >= 0);
+  assert.ok(forecast.recurringExpenseMonthly >= 0);
 });
