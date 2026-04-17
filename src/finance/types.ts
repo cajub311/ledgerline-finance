@@ -116,6 +116,15 @@ export interface MonthlyTrendItem {
   spend: number;
 }
 
+/** End-of-month net worth snapshot (assets = positive balances, liabilities = sum of negative balances). */
+export interface NetWorthSeriesPoint {
+  monthKey: string;
+  label: string;
+  netWorth: number;
+  assets: number;
+  liabilities: number;
+}
+
 export interface TopMerchantItem {
   payee: string;
   total: number;

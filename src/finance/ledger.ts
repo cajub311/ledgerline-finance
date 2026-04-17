@@ -18,6 +18,7 @@ import type {
   ImportRecord,
   ManualTransactionDraft,
   MonthlyTrendItem,
+  NetWorthSeriesPoint,
   ParsedStatementBatch,
   ParsedStatementRow,
   TopMerchantItem,
@@ -504,6 +505,151 @@ export function getMonthlyTrend(
       monthKey,
       income: Number(income.toFixed(2)),
       spend: Number(spend.toFixed(2)),
+    });
+  }
+
+  return result;
+}
+
+function pad2(n: number): string {
+  return `${n}`.padStart(2, '0');
+}
+
+function endOfMonthIso(year: number, month: number): string {
+  const d = new Date(year, month, 0);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function compareIsoDate(a: string, b: string): number {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
+
+function compareYearMonth(
+  a: { year: number; month: number },
+  b: { year: number; month: number },
+): number {
+  if (a.year !== b.year) return a.year - b.year;
+  return a.month - b.month;
+}
+
+function accountIsLiability(type: FinanceAccount['type']): boolean {
+  return type === 'credit' || type === 'loan';
+}
+
+/**
+ * Net worth at each month boundary: sort transactions once, walk forward applying amounts to per-account
+ * running balances. Last point matches `getFinanceSummary(state).netWorth`. Pass `months <= 0` for ALL months
+ * from the earliest transaction through the current calendar month.
+ */
+export function getNetWorthSeries(state: FinanceState, months: number): NetWorthSeriesPoint[] {
+  const now = new Date();
+  const curYear = now.getFullYear();
+  const curMonth = now.getMonth() + 1;
+
+  const sorted = [...state.transactions].sort((a, b) => {
+    const c = compareIsoDate(a.date, b.date);
+    return c !== 0 ? c : a.id.localeCompare(b.id);
+  });
+
+  const earliestFromTxs = sorted.length
+    ? (() => {
+        const key = sorted[0]!.date.slice(0, 7);
+        const y = Number(key.slice(0, 4));
+        const m = Number(key.slice(5, 7));
+        return Number.isFinite(y) && Number.isFinite(m) ? { year: y, month: m } : { year: curYear, month: curMonth };
+      })()
+    : { year: curYear, month: curMonth };
+
+  const start =
+    months > 0
+      ? (() => {
+          const idx = curYear * 12 + (curMonth - 1) - (months - 1);
+          const fromWindow = { year: Math.floor(idx / 12), month: (idx % 12) + 1 };
+          if (compareYearMonth(fromWindow, earliestFromTxs) < 0) return earliestFromTxs;
+          return fromWindow;
+        })()
+      : earliestFromTxs;
+
+  const boundaries: Array<{ year: number; month: number; monthKey: string; label: string }> = [];
+  let y = start.year;
+  let m = start.month;
+  while (y < curYear || (y === curYear && m <= curMonth)) {
+    const monthKey = `${y}-${pad2(m)}`;
+    const d = new Date(y, m - 1, 1);
+    const label = d.toLocaleString('default', { month: 'short', year: '2-digit' });
+    boundaries.push({ year: y, month: m, monthKey, label });
+    if (m === 12) {
+      y += 1;
+      m = 1;
+    } else {
+      m += 1;
+    }
+  }
+
+  if (boundaries.length === 0) {
+    boundaries.push({
+      year: curYear,
+      month: curMonth,
+      monthKey: `${curYear}-${pad2(curMonth)}`,
+      label: new Date(curYear, curMonth - 1, 1).toLocaleString('default', { month: 'short', year: '2-digit' }),
+    });
+  }
+
+  const running: Record<string, number> = {};
+  for (const account of state.accounts) {
+    running[account.id] = Number(account.openingBalance.toFixed(2));
+  }
+
+  let txPtr = 0;
+  const result: NetWorthSeriesPoint[] = [];
+
+  for (let i = 0; i < boundaries.length; i += 1) {
+    const b = boundaries[i]!;
+    const isLast = i === boundaries.length - 1;
+    const endIso = endOfMonthIso(b.year, b.month);
+
+    while (txPtr < sorted.length) {
+      const tx = sorted[txPtr]!;
+      if (!isLast && compareIsoDate(tx.date, endIso) > 0) break;
+      if (isLast) {
+        const prev = running[tx.accountId] ?? 0;
+        running[tx.accountId] = Number((prev + tx.amount).toFixed(2));
+        txPtr += 1;
+        continue;
+      }
+      if (compareIsoDate(tx.date, endIso) <= 0) {
+        const prev = running[tx.accountId] ?? 0;
+        running[tx.accountId] = Number((prev + tx.amount).toFixed(2));
+        txPtr += 1;
+      } else {
+        break;
+      }
+    }
+
+    let assets = 0;
+    let liabilities = 0;
+    for (const account of state.accounts) {
+      const bal = running[account.id] ?? 0;
+      if (accountIsLiability(account.type)) {
+        liabilities += bal;
+      } else if (bal > 0) {
+        assets += bal;
+      } else {
+        liabilities += bal;
+      }
+    }
+    assets = Number(assets.toFixed(2));
+    liabilities = Number(liabilities.toFixed(2));
+    const netWorth = Number((assets + liabilities).toFixed(2));
+
+    result.push({
+      monthKey: b.monthKey,
+      label: b.label,
+      netWorth,
+      assets,
+      liabilities,
     });
   }
 
