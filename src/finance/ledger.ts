@@ -2,7 +2,9 @@ import seedData from '../data/financeSeed.json';
 import { CATEGORY_ICONS, CATEGORY_OPTIONS, cycleCategory, normalizeCategory } from './categories';
 import type {
   Budget,
+  BudgetEnvelope,
   BudgetStatus,
+  BudgetViewMode,
   CashFlowProjection,
   CashFlowProjectionPoint,
   CategoryBreakdownItem,
@@ -25,9 +27,15 @@ import type {
 
 const DEFAULT_PREFERENCES: FinancePreferences = {
   forecastLowBalanceThreshold: 500,
+  budgetViewMode: 'flow',
 };
 
 function mergePreferences(partial?: Partial<FinancePreferences> | null): FinancePreferences {
+  const mode: BudgetViewMode =
+    partial?.budgetViewMode === 'envelope' || partial?.budgetViewMode === 'flow'
+      ? partial.budgetViewMode
+      : DEFAULT_PREFERENCES.budgetViewMode;
+
   return {
     forecastLowBalanceThreshold:
       typeof partial?.forecastLowBalanceThreshold === 'number' &&
@@ -35,6 +43,7 @@ function mergePreferences(partial?: Partial<FinancePreferences> | null): Finance
       partial.forecastLowBalanceThreshold >= 0
         ? partial.forecastLowBalanceThreshold
         : DEFAULT_PREFERENCES.forecastLowBalanceThreshold,
+    budgetViewMode: mode,
   };
 }
 
@@ -54,8 +63,19 @@ function cloneImports(imports: ImportRecord[]): ImportRecord[] {
   return imports.map((record) => ({ ...record }));
 }
 
+export function normalizeBudget(budget: Budget): Budget {
+  const rollover = budget.rollover === false ? false : true;
+  const carry =
+    typeof budget.carry === 'number' && Number.isFinite(budget.carry) ? Number(budget.carry.toFixed(2)) : undefined;
+  return {
+    ...budget,
+    rollover,
+    ...(carry !== undefined ? { carry } : {}),
+  };
+}
+
 function cloneBudgets(budgets: Budget[]): Budget[] {
-  return budgets.map((b) => ({ ...b }));
+  return budgets.map((b) => normalizeBudget(b));
 }
 
 function cloneGoals(goals: FinancialGoal[]): FinancialGoal[] {
@@ -81,6 +101,61 @@ function getTransactionKey(transaction: Pick<FinanceTransaction, 'accountId' | '
 
 function getCurrentMonthKey(date = new Date()): string {
   return `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}`;
+}
+
+function parseBudgetStartMonth(createdAt: string): { year: number; month: number } {
+  const d = new Date(createdAt);
+  if (!Number.isFinite(d.getTime())) {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() + 1 };
+  }
+  return { year: d.getFullYear(), month: d.getMonth() + 1 };
+}
+
+/** Compare two calendar months; negative if a < b, 0 if equal, positive if a > b. */
+function compareYearMonth(aY: number, aM: number, bY: number, bM: number): number {
+  return aY * 12 + aM - (bY * 12 + bM);
+}
+
+function incrementMonth(y: number, m: number): { year: number; month: number } {
+  if (m >= 12) return { year: y + 1, month: 1 };
+  return { year: y, month: m + 1 };
+}
+
+function spendInCategoryMonth(
+  transactions: FinanceTransaction[],
+  category: string,
+  year: number,
+  month: number,
+): number {
+  const monthKey = `${year}-${`${month}`.padStart(2, '0')}`;
+  return Number(
+    transactions
+      .filter(
+        (tx) =>
+          tx.date.startsWith(monthKey) &&
+          tx.amount < 0 &&
+          tx.category === category &&
+          tx.category !== 'Transfer',
+      )
+      .reduce((sum, tx) => sum + Math.abs(tx.amount), 0)
+      .toFixed(2),
+  );
+}
+
+export function getMonthIncome(transactions: FinanceTransaction[], year: number, month: number): number {
+  const monthKey = `${year}-${`${month}`.padStart(2, '0')}`;
+  return Number(
+    transactions
+      .filter((tx) => tx.date.startsWith(monthKey) && tx.amount > 0)
+      .reduce((sum, tx) => sum + tx.amount, 0)
+      .toFixed(2),
+  );
+}
+
+function nextRolledCarry(endAvailable: number, rollover: boolean): number {
+  if (rollover) return Number(endAvailable.toFixed(2));
+  return Number(Math.min(0, endAvailable).toFixed(2));
 }
 
 function accountBalance(account: FinanceAccount, transactions: FinanceTransaction[]): number {
@@ -810,17 +885,17 @@ export function setBudget(state: FinanceState, category: string, limit: number):
     return {
       ...state,
       budgets: state.budgets.map((b) =>
-        b.category === category ? { ...b, monthlyLimit: limit } : b,
+        b.category === category ? normalizeBudget({ ...b, monthlyLimit: limit }) : b,
       ),
     };
   }
 
-  const newBudget: Budget = {
+  const newBudget: Budget = normalizeBudget({
     id: createId('bgt'),
     category,
     monthlyLimit: limit,
     createdAt: new Date().toISOString(),
-  };
+  });
 
   return {
     ...state,
@@ -848,17 +923,97 @@ export function getBudgetStatus(
   }
 
   return state.budgets.map((budget) => {
-    const spent = spentByCategory[budget.category] ?? 0;
-    const pct = budget.monthlyLimit > 0 ? spent / budget.monthlyLimit : 0;
+    const normalized = normalizeBudget(budget);
+    const spent = spentByCategory[normalized.category] ?? 0;
+    const pct = normalized.monthlyLimit > 0 ? spent / normalized.monthlyLimit : 0;
 
     return {
-      category: budget.category,
-      limit: budget.monthlyLimit,
+      category: normalized.category,
+      limit: normalized.monthlyLimit,
       spent: Number(spent.toFixed(2)),
       pct: Number(pct.toFixed(4)),
       status: pct >= 1 ? 'over' : pct >= 0.7 ? 'warning' : 'ok',
     };
   });
+}
+
+/**
+ * Zero-based envelope balances for each budget: carry from prior months (with rollover rules),
+ * this month's assignment (monthlyLimit), spend, and available.
+ */
+export function getBudgetEnvelopes(state: FinanceState, year: number, month: number): BudgetEnvelope[] {
+  const txs = state.transactions;
+
+  return state.budgets.map((raw) => {
+    const budget = normalizeBudget(raw);
+    const { year: startY, month: startM } = parseBudgetStartMonth(budget.createdAt);
+    const rollover = budget.rollover !== false;
+    const openingAdjust = typeof budget.carry === 'number' && Number.isFinite(budget.carry) ? budget.carry : 0;
+
+    let carryInto = 0;
+    if (compareYearMonth(year, month, startY, startM) >= 0) {
+      carryInto = openingAdjust;
+      let y = startY;
+      let m = startM;
+      while (compareYearMonth(y, m, year, month) < 0) {
+        const assigned = budget.monthlyLimit;
+        const spent = spendInCategoryMonth(txs, budget.category, y, m);
+        const endAvailable = Number((carryInto + assigned - spent).toFixed(2));
+        carryInto = nextRolledCarry(endAvailable, rollover);
+        const next = incrementMonth(y, m);
+        y = next.year;
+        m = next.month;
+      }
+    }
+
+    const assigned = budget.monthlyLimit;
+    const spent = spendInCategoryMonth(txs, budget.category, year, month);
+    const available = Number((carryInto + assigned - spent).toFixed(2));
+    const denom = assigned > 0 ? assigned : 0;
+    const pct = denom > 0 ? spent / denom : spent > 0 ? 1 : 0;
+    const status: BudgetEnvelope['status'] =
+      available < 0 ? 'over' : pct >= 0.7 ? 'warning' : 'ok';
+
+    return {
+      id: budget.id,
+      category: budget.category,
+      assigned: Number(assigned.toFixed(2)),
+      carriedIn: Number(carryInto.toFixed(2)),
+      spent: Number(spent.toFixed(2)),
+      available: Number(available.toFixed(2)),
+      status,
+    };
+  });
+}
+
+export function setBudgetViewMode(state: FinanceState, mode: BudgetViewMode): FinanceState {
+  return {
+    ...state,
+    preferences: mergePreferences({ ...state.preferences, budgetViewMode: mode }),
+  };
+}
+
+export function setBudgetRollover(state: FinanceState, budgetId: string, rollover: boolean): FinanceState {
+  return {
+    ...state,
+    budgets: state.budgets.map((b) => (b.id === budgetId ? normalizeBudget({ ...b, rollover }) : b)),
+  };
+}
+
+export function setBudgetCarry(state: FinanceState, budgetId: string, carry: number | undefined): FinanceState {
+  return {
+    ...state,
+    budgets: state.budgets.map((b) => {
+      if (b.id !== budgetId) return b;
+      const next = { ...b };
+      if (carry === undefined || !Number.isFinite(carry)) {
+        delete next.carry;
+      } else {
+        next.carry = Number(carry.toFixed(2));
+      }
+      return normalizeBudget(next);
+    }),
+  };
 }
 
 // ─── Financial Goals ──────────────────────────────────────────────────────────
