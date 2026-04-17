@@ -1,11 +1,12 @@
-import { useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Badge } from '../components/ui/Badge';
 import { Card } from '../components/ui/Card';
 import { StatTile } from '../components/ui/StatTile';
 import { IncomeSpendBars } from '../components/charts/BarChart';
 import { CategoryBreakdownList } from '../components/charts/CategoryBreakdownList';
+import { NetWorthLineChart } from '../components/charts/NetWorthLineChart';
 import {
   detectSubscriptions,
   generateInsights,
@@ -17,6 +18,7 @@ import {
   getFinancialHealthScore,
   getLatestTransactions,
   getMonthlyTrend,
+  getNetWorthSeries,
   getSafeToSpend,
   getSavingsRate,
   getTopMerchants,
@@ -30,8 +32,11 @@ interface DashboardPageProps {
   state: FinanceState;
 }
 
+type NetWorthHorizon = 3 | 6 | 12 | 'all';
+
 export function DashboardPage({ state }: DashboardPageProps) {
   const { palette } = useTheme();
+  const [netWorthHorizon, setNetWorthHorizon] = useState<NetWorthHorizon>(6);
   const summary = useMemo(() => getFinanceSummary(state), [state]);
   const savingsRate = useMemo(() => getSavingsRate(state), [state]);
   const trend = useMemo(() => getMonthlyTrend(state.transactions, 6), [state.transactions]);
@@ -67,6 +72,18 @@ export function DashboardPage({ state }: DashboardPageProps) {
   const subsMonthly = subs.filter((s) => s.frequency === 'monthly').reduce((s, c) => s + c.amount, 0);
   const safeToSpend = useMemo(() => getSafeToSpend(state), [state]);
   const health = useMemo(() => getFinancialHealthScore(state), [state]);
+
+  const netWorthSeries = useMemo(() => {
+    const months = netWorthHorizon === 'all' ? 0 : netWorthHorizon;
+    return getNetWorthSeries(state, months);
+  }, [state, netWorthHorizon]);
+
+  const netWorthPills: { key: NetWorthHorizon; label: string }[] = [
+    { key: 3, label: '3M' },
+    { key: 6, label: '6M' },
+    { key: 12, label: '12M' },
+    { key: 'all', label: 'ALL' },
+  ];
 
   return (
     <View style={{ gap: spacing.lg }}>
@@ -128,6 +145,48 @@ export function DashboardPage({ state }: DashboardPageProps) {
           footer={savingsRate >= 20 ? 'Healthy' : savingsRate > 0 ? 'Keep building' : 'No savings this month'}
         />
       </View>
+
+      <Card
+        title="Net worth trend"
+        eyebrow="End of month · assets vs liabilities"
+        action={
+          <View style={styles.pillRow}>
+            {netWorthPills.map(({ key, label }) => {
+              const active = netWorthHorizon === key;
+              return (
+                <Pressable
+                  key={label}
+                  onPress={() => setNetWorthHorizon(key)}
+                  style={({ pressed }) => [
+                    styles.pill,
+                    {
+                      backgroundColor: active ? palette.primarySoft : palette.surfaceSunken,
+                      borderColor: active ? palette.primary : palette.borderSoft,
+                      opacity: pressed ? 0.85 : 1,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      fontSize: typography.micro,
+                      fontWeight: '800',
+                      color: active ? palette.primary : palette.textMuted,
+                    }}
+                  >
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        }
+      >
+        {netWorthSeries.length === 0 ? (
+          <Text style={{ color: palette.textSubtle, fontSize: typography.small }}>No data for this range.</Text>
+        ) : (
+          <NetWorthLineChart data={netWorthSeries} height={260} />
+        )}
+      </Card>
 
       <View style={styles.twoCol}>
         <Card title="Income vs spend" eyebrow="Last 6 months" style={styles.flex2}>
@@ -337,6 +396,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.md,
+  },
+  pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
+  pill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    borderWidth: 1,
   },
   twoCol: {
     flexDirection: 'row',
