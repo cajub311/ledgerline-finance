@@ -40,6 +40,10 @@ export interface Budget {
   category: string;
   monthlyLimit: number;
   createdAt: string;
+  /** When true (default), surplus and debt roll into the next month */
+  rollover: boolean;
+  /** Optional manual seed for carry into the budget’s first month */
+  carry?: number;
 }
 
 export interface FinancialGoal {
@@ -51,9 +55,13 @@ export interface FinancialGoal {
   createdAt: string;
 }
 
+export type BudgetViewMode = 'flow' | 'envelope';
+
 export interface FinancePreferences {
   /** Balance threshold for cash-flow forecast warnings; 0 disables highlights */
   forecastLowBalanceThreshold: number;
+  /** Flow = classic limit vs this month’s spend; envelope = rollover / ready-to-assign */
+  budgetViewMode: BudgetViewMode;
 }
 
 export interface FinanceState {
@@ -136,6 +144,17 @@ export interface BudgetStatus {
   limit: number;
   spent: number;
   pct: number;
+  status: 'ok' | 'warning' | 'over';
+}
+
+/** Per-budget envelope row for a calendar month (YNAB-style rollover). */
+export interface BudgetEnvelope {
+  budgetId: string;
+  category: string;
+  assigned: number;
+  carriedIn: number;
+  spent: number;
+  available: number;
   status: 'ok' | 'warning' | 'over';
 }
 

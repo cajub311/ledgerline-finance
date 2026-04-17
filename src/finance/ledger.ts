@@ -2,7 +2,9 @@ import seedData from '../data/financeSeed.json';
 import { CATEGORY_ICONS, CATEGORY_OPTIONS, cycleCategory, normalizeCategory } from './categories';
 import type {
   Budget,
+  BudgetEnvelope,
   BudgetStatus,
+  BudgetViewMode,
   CashFlowProjection,
   CashFlowProjectionPoint,
   CategoryBreakdownItem,
@@ -25,9 +27,15 @@ import type {
 
 const DEFAULT_PREFERENCES: FinancePreferences = {
   forecastLowBalanceThreshold: 500,
+  budgetViewMode: 'flow',
 };
 
 function mergePreferences(partial?: Partial<FinancePreferences> | null): FinancePreferences {
+  const mode: BudgetViewMode =
+    partial?.budgetViewMode === 'envelope' || partial?.budgetViewMode === 'flow'
+      ? partial.budgetViewMode
+      : DEFAULT_PREFERENCES.budgetViewMode;
+
   return {
     forecastLowBalanceThreshold:
       typeof partial?.forecastLowBalanceThreshold === 'number' &&
@@ -35,6 +43,7 @@ function mergePreferences(partial?: Partial<FinancePreferences> | null): Finance
       partial.forecastLowBalanceThreshold >= 0
         ? partial.forecastLowBalanceThreshold
         : DEFAULT_PREFERENCES.forecastLowBalanceThreshold,
+    budgetViewMode: mode,
   };
 }
 
@@ -54,8 +63,15 @@ function cloneImports(imports: ImportRecord[]): ImportRecord[] {
   return imports.map((record) => ({ ...record }));
 }
 
+export function normalizeBudget(raw: Budget): Budget {
+  const rollover = raw.rollover !== false;
+  const carry =
+    typeof raw.carry === 'number' && Number.isFinite(raw.carry) ? Number(raw.carry.toFixed(2)) : undefined;
+  return { ...raw, rollover, carry };
+}
+
 function cloneBudgets(budgets: Budget[]): Budget[] {
-  return budgets.map((b) => ({ ...b }));
+  return budgets.map((b) => normalizeBudget({ ...b }));
 }
 
 function cloneGoals(goals: FinancialGoal[]): FinancialGoal[] {
@@ -101,7 +117,7 @@ export function createFinanceState(): FinanceState {
     normalizeTransaction,
   );
   const imports = cloneImports(seedData.imports as ImportRecord[]);
-  const budgets = cloneBudgets((seedData as { budgets?: Budget[] }).budgets ?? []);
+  const budgets = cloneBudgets(((seedData as unknown) as { budgets?: Budget[] }).budgets ?? []);
   const goals = cloneGoals((seedData as { goals?: FinancialGoal[] }).goals ?? []);
 
   return {
@@ -135,7 +151,9 @@ export function rehydrateFinanceState(snapshot: Partial<FinanceState> | null | u
       snapshot.transactions?.length ? (snapshot.transactions as FinanceTransaction[]) : seed.transactions,
     ).map(normalizeTransaction),
     imports: cloneImports(snapshot.imports?.length ? (snapshot.imports as ImportRecord[]) : seed.imports),
-    budgets: cloneBudgets(snapshot.budgets ?? seed.budgets),
+    budgets: cloneBudgets(
+      snapshot.budgets?.length ? (snapshot.budgets as Budget[]).map((b) => normalizeBudget({ ...b })) : seed.budgets,
+    ),
     goals: cloneGoals(snapshot.goals ?? seed.goals),
     preferences: mergePreferences(snapshot.preferences ?? seed.preferences),
   };
@@ -673,6 +691,135 @@ function monthSpendExcludingTransfer(transactions: FinanceTransaction[], year: n
   );
 }
 
+function compareCalendarMonth(y1: number, m1: number, y2: number, m2: number): number {
+  if (y1 !== y2) return y1 - y2;
+  return m1 - m2;
+}
+
+function budgetCreatedYearMonth(createdAt: string): { year: number; month: number } {
+  const d = new Date(createdAt);
+  if (!Number.isFinite(d.getTime())) {
+    return { year: 1970, month: 1 };
+  }
+  return { year: d.getFullYear(), month: d.getMonth() + 1 };
+}
+
+function categorySpendForMonth(
+  transactions: FinanceTransaction[],
+  category: string,
+  year: number,
+  month: number,
+): number {
+  const monthKey = `${year}-${`${month}`.padStart(2, '0')}`;
+  return Number(
+    transactions
+      .filter((tx) => tx.date.startsWith(monthKey) && tx.amount < 0 && tx.category === category)
+      .reduce((sum, tx) => sum + Math.abs(tx.amount), 0)
+      .toFixed(2),
+  );
+}
+
+/** Positive sum of inflows in a calendar month (all accounts, uncategorized income included). */
+export function getMonthIncome(transactions: FinanceTransaction[], year: number, month: number): number {
+  const monthKey = `${year}-${`${month}`.padStart(2, '0')}`;
+  return Number(
+    transactions
+      .filter((tx) => tx.date.startsWith(monthKey) && tx.amount > 0)
+      .reduce((sum, tx) => sum + tx.amount, 0)
+      .toFixed(2),
+  );
+}
+
+/**
+ * Envelope / zero-based view for each budget in `year`-`month`.
+ * Carry walks from the budget’s creation month through M−1; rollover=true rolls surplus and debt;
+ * rollover=false ignores surplus but still rolls debt forward.
+ */
+export function getBudgetEnvelopes(state: FinanceState, year: number, month: number): BudgetEnvelope[] {
+  return state.budgets.map((budget) => {
+    const created = budgetCreatedYearMonth(budget.createdAt);
+    let carriedIn = 0;
+
+    if (compareCalendarMonth(year, month, created.year, created.month) >= 0) {
+      if (compareCalendarMonth(year, month, created.year, created.month) === 0) {
+        carriedIn = typeof budget.carry === 'number' ? budget.carry : 0;
+      } else {
+        let y = created.year;
+        let m = created.month;
+        let running = typeof budget.carry === 'number' ? budget.carry : 0;
+
+        const applyMonth = (yy: number, mm: number) => {
+          const assigned = budget.monthlyLimit;
+          const spent = categorySpendForMonth(state.transactions, budget.category, yy, mm);
+          const available = running + assigned - spent;
+          running = budget.rollover === true ? available : available < 0 ? available : 0;
+        };
+
+        applyMonth(y, m);
+
+        while (true) {
+          m += 1;
+          if (m > 12) {
+            m = 1;
+            y += 1;
+          }
+          if (compareCalendarMonth(y, m, year, month) >= 0) break;
+          applyMonth(y, m);
+        }
+
+        carriedIn = running;
+      }
+    }
+
+    const assigned = budget.monthlyLimit;
+    const spent = categorySpendForMonth(state.transactions, budget.category, year, month);
+    const available = Number((carriedIn + assigned - spent).toFixed(2));
+    const denom = assigned + carriedIn;
+    const pct = denom > 0 ? spent / denom : budget.monthlyLimit > 0 ? spent / budget.monthlyLimit : 0;
+    const status: BudgetEnvelope['status'] =
+      available < 0 ? 'over' : pct >= 0.7 ? 'warning' : 'ok';
+
+    return {
+      budgetId: budget.id,
+      category: budget.category,
+      assigned: Number(assigned.toFixed(2)),
+      carriedIn: Number(carriedIn.toFixed(2)),
+      spent: Number(spent.toFixed(2)),
+      available,
+      status,
+    };
+  });
+}
+
+export function getReadyToAssign(state: FinanceState, year: number, month: number): number {
+  const income = getMonthIncome(state.transactions, year, month);
+  const assigned = state.budgets.reduce((sum, b) => sum + b.monthlyLimit, 0);
+  return Number((income - assigned).toFixed(2));
+}
+
+export function setBudgetViewMode(state: FinanceState, mode: BudgetViewMode): FinanceState {
+  return {
+    ...state,
+    preferences: { ...state.preferences, budgetViewMode: mode },
+  };
+}
+
+export function setBudgetRollover(state: FinanceState, budgetId: string, rollover: boolean): FinanceState {
+  return {
+    ...state,
+    budgets: state.budgets.map((b) => (b.id === budgetId ? normalizeBudget({ ...b, rollover }) : b)),
+  };
+}
+
+export function updateBudgetMonthlyLimit(state: FinanceState, budgetId: string, monthlyLimit: number): FinanceState {
+  const limit = Number(monthlyLimit);
+  if (!Number.isFinite(limit) || limit < 0) return state;
+  return {
+    ...state,
+    budgets: state.budgets.map((b) => (b.id === budgetId ? normalizeBudget({ ...b, monthlyLimit: limit }) : b)),
+  };
+}
+
 /** Conservative discretionary buffer: liquid cash minus pace-adjusted rest-of-month spend. */
 export function getSafeToSpend(state: FinanceState): number {
   const summary = getFinanceSummary(state);
@@ -810,17 +957,18 @@ export function setBudget(state: FinanceState, category: string, limit: number):
     return {
       ...state,
       budgets: state.budgets.map((b) =>
-        b.category === category ? { ...b, monthlyLimit: limit } : b,
+        b.category === category ? normalizeBudget({ ...b, monthlyLimit: limit }) : b,
       ),
     };
   }
 
-  const newBudget: Budget = {
+  const newBudget: Budget = normalizeBudget({
     id: createId('bgt'),
     category,
     monthlyLimit: limit,
     createdAt: new Date().toISOString(),
-  };
+    rollover: true,
+  });
 
   return {
     ...state,
