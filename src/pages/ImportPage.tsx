@@ -92,18 +92,29 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
 
   const handleWizardCsvFile = async () => {
     if (!webOnly) {
-      notify('CSV wizard file pick works on the web.', 'danger');
+      notify('The mapping wizard file picker works on the web.', 'danger');
       return;
     }
     try {
       setBusy(true);
       const files = await pickWebStatementFiles();
-      const file = files.find((f) => f.name.toLowerCase().endsWith('.csv'));
+      const file = files.find((f) => {
+        const n = f.name.toLowerCase();
+        return (
+          n.endsWith('.csv') ||
+          n.endsWith('.tsv') ||
+          n.endsWith('.txt') ||
+          n.endsWith('.xlsx') ||
+          n.endsWith('.xls') ||
+          n.endsWith('.pdf')
+        );
+      });
       if (!file) {
-        notify('Select a .csv file for the mapping wizard.', 'danger');
+        notify('Select a CSV, TSV, text, Excel, or PDF file for the mapping wizard.', 'danger');
         return;
       }
-      const text = await file.text();
+      const { fileToWizardDelimitedText } = await import('../finance/import.web');
+      const text = await fileToWizardDelimitedText(file);
       loadWizardFromText(text, file.name);
     } catch (error) {
       notify(`Could not read file: ${getErrorMessage(error)}`, 'danger');
@@ -237,6 +248,29 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
     notify('Full backup exported.', 'success');
   };
 
+  const exportLedgerXlsx = async () => {
+    if (typeof document === 'undefined') return;
+    try {
+      setBusy(true);
+      const { buildLedgerWorkbookBuffer } = await import('../finance/export');
+      const buffer = await buildLedgerWorkbookBuffer(state);
+      const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `ledgerline-export-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(url);
+      notify('Exported workbook (transactions, accounts, budgets, goals).', 'success');
+    } catch (error) {
+      notify(`Excel export failed: ${getErrorMessage(error)}`, 'danger');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const importBackup = async () => {
     try {
       setBusy(true);
@@ -262,7 +296,8 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
       <View>
         <Text style={[styles.title, { color: palette.text }]}>Import & export</Text>
         <Text style={[styles.subtitle, { color: palette.textMuted }]}>
-          Upload statements from any bank (CSV, XLSX, or PDF), paste text, or back up your whole ledger.
+          Bring data from any bank: quick import, a column-mapping wizard for messy CSV/TSV/Excel/PDF exports, paste
+          text, and full backups to CSV, Excel, or JSON.
         </Text>
       </View>
 
@@ -316,27 +351,29 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
         )}
       </Card>
 
-      <Card title="CSV import wizard" eyebrow="Preview · map columns · dedupe">
+      <Card title="Import wizard" eyebrow="CSV · TSV · Excel · PDF">
         <Text style={{ color: palette.textMuted, fontSize: typography.small, lineHeight: 19, marginBottom: spacing.md }}>
-          For bank CSVs (Wells Fargo, Chase, etc.): we auto-suggest column roles. Preview the first 10 rows, adjust
-          mappings, then import. Duplicates are skipped using the same date + payee + amount key as quick import.
+          Map columns when your bank uses odd headers, European semicolon CSVs, tab-separated exports, or the first
+          sheet of an Excel file. For PDFs we extract text into lines first—then map columns if the file is
+          table-shaped, or use quick import for auto-parse. Duplicates use the same date + payee + amount key as quick
+          import.
         </Text>
         <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap', marginBottom: spacing.md }}>
           <Button
-            label={busy ? 'Loading…' : 'Load CSV file'}
+            label={busy ? 'Loading…' : 'Load file for wizard'}
             onPress={handleWizardCsvFile}
             disabled={busy || !webOnly || !accountId}
             variant="secondary"
           />
           <Button
-            label="Load pasted CSV below"
+            label="Use pasted text below"
             onPress={() => {
               const t = pasted.trim();
               if (!t) {
-                notify('Paste CSV into the box in “Paste statement text” first, or use Load CSV file.', 'danger');
+                notify('Paste delimited data into “Paste statement text” first, or use Load file for wizard.', 'danger');
                 return;
               }
-              loadWizardFromText(t, 'pasted-csv-wizard');
+              loadWizardFromText(t, 'pasted-wizard');
             }}
             disabled={!accountId}
             variant="ghost"
@@ -413,10 +450,10 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
       </Card>
 
       <View style={styles.grid}>
-        <Card title="Upload files" eyebrow="CSV · XLSX · PDF" style={styles.flex1}>
+        <Card title="Quick import" eyebrow="CSV · TSV · XLSX · PDF" style={styles.flex1}>
           <Text style={{ color: palette.textMuted, fontSize: typography.small, lineHeight: 19 }}>
-            We detect the column headers automatically for most banks. Duplicates are skipped by
-            date, payee, and amount.
+            One tap: we detect delimiters and common column names (including debit/credit pairs). PDFs use improved
+            line grouping so rows are easier to find. Duplicates are skipped by date, payee, and amount.
           </Text>
           <Button
             label={busy ? 'Importing…' : 'Choose file(s)'}
@@ -452,13 +489,15 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
         </Card>
       </View>
 
-      <Card title="Backups" eyebrow="Full state">
+      <Card title="Export & backups" eyebrow="Spreadsheet · CSV · JSON">
         <Text style={{ color: palette.textMuted, fontSize: typography.small, lineHeight: 19 }}>
-          Exports capture accounts, transactions, budgets, goals, and import history. Keep one handy
-          before major imports — restoring replaces your ledger.
+          JSON is the full restore format. Excel bundles the main tables on separate sheets for analysis in Sheets or
+          Excel. CSV is a simple transaction dump. Keep a backup before large imports—restoring JSON replaces your
+          ledger.
         </Text>
         <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
           <Button label="Export CSV (transactions)" variant="secondary" onPress={exportCsv} />
+          <Button label="Export Excel (.xlsx)" variant="secondary" onPress={exportLedgerXlsx} disabled={busy} />
           <Button label="Export JSON backup" onPress={exportJson} />
           <Button label="Restore from JSON" variant="ghost" onPress={importBackup} disabled={busy} />
         </View>

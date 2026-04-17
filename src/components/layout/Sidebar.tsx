@@ -195,7 +195,10 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
   },
   icon: {
-    fontSize: 18,
+    fontSize: 16,
+    fontWeight: '700',
+    width: 22,
+    textAlign: 'center',
   },
   label: {
     fontSize: typography.body,
@@ -253,7 +256,10 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
   },
   pillIcon: {
-    fontSize: 14,
+    fontSize: 13,
+    fontWeight: '700',
+    minWidth: 18,
+    textAlign: 'center',
   },
   pillLabel: {
     fontSize: typography.small,

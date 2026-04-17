@@ -1,6 +1,57 @@
 import { parseObjectStatementRows, parseStatementText } from './import.shared';
 import type { ParsedStatementBatch } from './types';
 
+type PdfTextItem = {
+  str?: string;
+  transform?: number[];
+  width?: number;
+  height?: number;
+};
+
+/** Group PDF text items into lines by Y position so statement columns stay readable for parsing. */
+function pdfItemsToStatementText(items: PdfTextItem[]): string {
+  const positioned = items
+    .map((item) => {
+      const str = (item.str ?? '').trim();
+      const t = item.transform;
+      const x = Array.isArray(t) && t.length >= 6 ? t[4]! : 0;
+      const y = Array.isArray(t) && t.length >= 6 ? t[5]! : 0;
+      return { str, x, y };
+    })
+    .filter((e) => e.str.length > 0);
+
+  if (positioned.length === 0) {
+    return '';
+  }
+
+  const yTolerance = 3;
+  positioned.sort((a, b) => (Math.abs(a.y - b.y) < yTolerance ? a.x - b.x : b.y - a.y));
+
+  const lines: { y: number; parts: { x: number; str: string }[] }[] = [];
+
+  for (const item of positioned) {
+    const line = lines.find((l) => Math.abs(l.y - item.y) < yTolerance);
+    if (line) {
+      line.parts.push({ x: item.x, str: item.str });
+    } else {
+      lines.push({ y: item.y, parts: [{ x: item.x, str: item.str }] });
+    }
+  }
+
+  return lines
+    .sort((a, b) => b.y - a.y)
+    .map((line) =>
+      line.parts
+        .sort((a, b) => a.x - b.x)
+        .map((p) => p.str)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim(),
+    )
+    .filter(Boolean)
+    .join('\n');
+}
+
 async function readPdfText(arrayBuffer: ArrayBuffer): Promise<string> {
   const pdfjs = await import('pdfjs-dist/build/pdf.mjs');
 
@@ -12,18 +63,43 @@ async function readPdfText(arrayBuffer: ArrayBuffer): Promise<string> {
   for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
     const page = await document.getPage(pageNumber);
     const textContent = await page.getTextContent();
-    const line = textContent.items
-      .map((item: { str?: string }) => item.str ?? '')
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    if (line) {
-      parts.push(line);
+    const items = textContent.items as PdfTextItem[];
+    const pageText = pdfItemsToStatementText(items);
+    if (pageText) {
+      parts.push(pageText);
     }
   }
 
-  return parts.join('\n');
+  return parts.join('\n\n');
+}
+
+/** First worksheet as CSV text (for column-mapping wizard with original bank headers). */
+export async function firstWorksheetToCsvText(buffer: ArrayBuffer): Promise<string> {
+  const XLSX = await import('xlsx');
+  const workbook = XLSX.read(buffer, { type: 'array' });
+  const firstSheetName = workbook.SheetNames[0];
+  const sheet = workbook.Sheets[firstSheetName];
+  return XLSX.utils.sheet_to_csv(sheet);
+}
+
+/** Raw text suitable for the column-mapping wizard: CSV/TXT as-is, first XLSX sheet as CSV, PDF as extracted lines. */
+export async function fileToWizardDelimitedText(file: File): Promise<string> {
+  const lowerName = file.name.toLowerCase();
+  const buffer = await file.arrayBuffer();
+
+  if (lowerName.endsWith('.pdf') || file.type === 'application/pdf') {
+    return readPdfText(buffer);
+  }
+
+  if (
+    lowerName.endsWith('.xlsx') ||
+    lowerName.endsWith('.xls') ||
+    /spreadsheet|excel/i.test(file.type)
+  ) {
+    return firstWorksheetToCsvText(buffer);
+  }
+
+  return file.text();
 }
 
 export async function parseStatementBlob(file: File): Promise<ParsedStatementBatch> {
@@ -47,14 +123,14 @@ export async function parseStatementBlob(file: File): Promise<ParsedStatementBat
     const workbook = XLSX.read(buffer, { type: 'array' });
     const firstSheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[firstSheetName];
-    const records = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
-    const rows = parseObjectStatementRows(records);
+    const csvText = XLSX.utils.sheet_to_csv(sheet);
+    const parsed = parseStatementText(csvText);
 
     return {
+      ...parsed,
       format: 'xlsx',
-      rows,
       sourceLabel: file.name,
-      notes: ['Imported from the first worksheet in the workbook.'],
+      notes: [...parsed.notes, 'Imported from the first worksheet (CSV layout from Excel).'],
     };
   }
 

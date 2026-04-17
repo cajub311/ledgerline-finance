@@ -38,14 +38,14 @@ type Tab =
   | 'settings';
 
 const TAB_ROUTES: ReadonlyArray<NavItem<Tab>> = [
-  { value: 'dashboard', label: 'Dashboard', icon: '🏠' },
-  { value: 'transactions', label: 'Transactions', icon: '🧾' },
-  { value: 'budgets', label: 'Budgets', icon: '🎯' },
-  { value: 'forecast', label: 'Forecast', icon: '📈' },
-  { value: 'goals', label: 'Goals', icon: '🚀' },
-  { value: 'accounts', label: 'Accounts', icon: '🏦' },
-  { value: 'import', label: 'Import', icon: '📥' },
-  { value: 'settings', label: 'Settings', icon: '⚙️' },
+  { value: 'dashboard', label: 'Dashboard', icon: '▣' },
+  { value: 'transactions', label: 'Transactions', icon: '≡' },
+  { value: 'budgets', label: 'Budgets', icon: '◎' },
+  { value: 'forecast', label: 'Forecast', icon: '↗' },
+  { value: 'goals', label: 'Goals', icon: '★' },
+  { value: 'accounts', label: 'Accounts', icon: '◐' },
+  { value: 'import', label: 'Import', icon: '↓' },
+  { value: 'settings', label: 'Settings', icon: '⚙' },
 ];
 
 export default function FinanceApp() {

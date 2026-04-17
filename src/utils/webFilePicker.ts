@@ -12,7 +12,7 @@ export function pickWebStatementFiles(): Promise<File[]> {
     input.type = 'file';
     input.multiple = true;
     input.accept =
-      'application/pdf,text/csv,.csv,.txt,.xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      'application/pdf,text/csv,text/tab-separated-values,.csv,.tsv,.txt,.xlsx,.xls,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     input.style.display = 'none';
 
     const finish = (files: File[]) => {

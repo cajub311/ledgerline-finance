@@ -90,7 +90,7 @@ function toIsoDate(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-function splitCsvLine(line: string): string[] {
+function splitDelimitedLine(line: string, delimiter: ',' | ';'): string[] {
   const cells: string[] = [];
   let current = '';
   let inQuotes = false;
@@ -110,7 +110,7 @@ function splitCsvLine(line: string): string[] {
       continue;
     }
 
-    if (char === ',' && !inQuotes) {
+    if (char === delimiter && !inQuotes) {
       cells.push(current.trim());
       current = '';
       continue;
@@ -121,6 +121,36 @@ function splitCsvLine(line: string): string[] {
 
   cells.push(current.trim());
   return cells;
+}
+
+function splitTabSeparatedLine(line: string): string[] {
+  return line.split('\t').map((cell) => cell.trim());
+}
+
+/** Pick delimiter from the first non-empty line (TSV, CSV, or semicolon-separated). */
+export function detectDelimiterFromHeaderLine(firstLine: string): ',' | '\t' | ';' {
+  const tabCount = (firstLine.match(/\t/g) ?? []).length;
+  const commaCols = splitDelimitedLine(firstLine, ',').length;
+  const semiCols = splitDelimitedLine(firstLine, ';').length;
+  const tabCols = tabCount > 0 ? firstLine.split('\t').length : 0;
+
+  if (tabCols >= 2 && tabCols >= commaCols && tabCols >= semiCols) {
+    return '\t';
+  }
+
+  if (semiCols >= 2 && semiCols > commaCols) {
+    return ';';
+  }
+
+  return ',';
+}
+
+function splitDataLine(line: string, delimiter: ',' | '\t' | ';'): string[] {
+  if (delimiter === '\t') {
+    return splitTabSeparatedLine(line);
+  }
+
+  return splitDelimitedLine(line, delimiter);
 }
 
 function normalizeHeaders(headers: string[]): string[] {
@@ -141,7 +171,7 @@ export interface CsvPreviewResult {
   rows: string[][];
 }
 
-/** First line = headers; returns up to `maxDataRows` data rows (trimmed cells). */
+/** First line = headers; returns up to `maxDataRows` data rows (trimmed cells). Supports CSV, TSV, and `;`-delimited exports. */
 export function previewDelimitedCsv(text: string, maxDataRows = 10): CsvPreviewResult | null {
   const lines = text
     .replace(/\r\n/g, '\n')
@@ -153,10 +183,11 @@ export function previewDelimitedCsv(text: string, maxDataRows = 10): CsvPreviewR
     return null;
   }
 
-  const headers = splitCsvLine(lines[0]).map((cell) => cell.trim());
+  const delimiter = detectDelimiterFromHeaderLine(lines[0]);
+  const headers = splitDataLine(lines[0], delimiter).map((cell) => cell.trim());
   const rows = lines
     .slice(1, 1 + maxDataRows)
-    .map((line) => splitCsvLine(line).map((cell) => cell.trim()));
+    .map((line) => splitDataLine(line, delimiter).map((cell) => cell.trim()));
 
   return { headers, rows };
 }
@@ -243,6 +274,8 @@ export function parseDelimitedWithMapping(text: string, roles: WizardColumnRole[
     return [];
   }
 
+  const delimiter = detectDelimiterFromHeaderLine(lines[0]);
+
   const syntheticHeaders = ['date', 'payee', 'amount'];
   if (mapping.category >= 0) {
     syntheticHeaders.push('category');
@@ -251,7 +284,7 @@ export function parseDelimitedWithMapping(text: string, roles: WizardColumnRole[
   const out: ParsedStatementRow[] = [];
 
   for (let li = 1; li < lines.length; li += 1) {
-    const cells = splitCsvLine(lines[li]).map((c) => c.trim());
+    const cells = splitDataLine(lines[li], delimiter).map((c) => c.trim());
     const dateVal = cells[mapping.date] ?? '';
     const payeeVal = cells[mapping.payee] ?? '';
     let amountVal: unknown = '';
@@ -373,10 +406,11 @@ export function parseDelimitedStatement(text: string): ParsedStatementRow[] {
     return [];
   }
 
-  const header = splitCsvLine(lines[0]).map((entry) => entry.trim().toLowerCase());
+  const delimiter = detectDelimiterFromHeaderLine(lines[0]);
+  const header = splitDataLine(lines[0], delimiter).map((entry) => entry.trim().toLowerCase());
   const rows = lines
     .slice(1)
-    .map((line) => splitCsvLine(line))
+    .map((line) => splitDataLine(line, delimiter))
     .map((row) => rowToStatementRow(row, header))
     .filter((entry): entry is ParsedStatementRow => entry !== null);
 
