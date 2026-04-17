@@ -167,3 +167,15 @@ export interface CashFlowProjection {
   startBalance: number;
   horizonDays: number;
 }
+
+export type NetWorthSeriesWindow = 3 | 6 | 12 | 'all';
+
+export interface NetWorthSeriesPoint {
+  monthKey: string;
+  label: string;
+  netWorth: number;
+  /** Sum of max(0, account balance) at month end */
+  assets: number;
+  /** Sum of min(0, account balance) at month end (negative or zero) */
+  liabilities: number;
+}

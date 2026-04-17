@@ -18,6 +18,8 @@ import type {
   ImportRecord,
   ManualTransactionDraft,
   MonthlyTrendItem,
+  NetWorthSeriesPoint,
+  NetWorthSeriesWindow,
   ParsedStatementBatch,
   ParsedStatementRow,
   TopMerchantItem,
@@ -146,6 +148,146 @@ export function getAccountBalances(state: FinanceState): Array<FinanceAccount & 
     ...account,
     currentBalance: accountBalance(account, state.transactions),
   }));
+}
+
+function lastDayOfMonthIso(year: number, month: number): string {
+  const last = new Date(year, month, 0);
+  const y = last.getFullYear();
+  const mo = last.getMonth() + 1;
+  const day = last.getDate();
+  return `${y}-${`${mo}`.padStart(2, '0')}-${`${day}`.padStart(2, '0')}`;
+}
+
+function monthKeysFromWindow(now: Date, window: NetWorthSeriesWindow): Array<{ year: number; month: number; monthKey: string; label: string }> {
+  const endY = now.getFullYear();
+  const endM = now.getMonth() + 1;
+  if (window === 'all') {
+    return [];
+  }
+  const n = window;
+  const keys: Array<{ year: number; month: number; monthKey: string; label: string }> = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(endY, endM - 1 - i, 1);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    const monthKey = `${year}-${`${month}`.padStart(2, '0')}`;
+    const label = d.toLocaleString('default', { month: 'short', year: '2-digit' });
+    keys.push({ year, month, monthKey, label });
+  }
+  return keys;
+}
+
+/**
+ * Net worth at each month end: O(accounts * months + transactions) by sorting txs once and advancing a pointer.
+ * `liabilities` is the sum of min(0, balance) per account (negative balances), matching balance sign convention.
+ */
+export function getNetWorthSeries(
+  state: FinanceState,
+  window: NetWorthSeriesWindow,
+  /** Defaults to today; tests pass a fixed date for stable month windows. */
+  asOf: Date = new Date(),
+): NetWorthSeriesPoint[] {
+  const now = asOf;
+  const endY = now.getFullYear();
+  const endM = now.getMonth() + 1;
+
+  const sorted = [...state.transactions].sort((a, b) => {
+    const c = a.date.localeCompare(b.date);
+    return c !== 0 ? c : a.id.localeCompare(b.id);
+  });
+
+  let monthSeries: Array<{ year: number; month: number; monthKey: string; label: string }>;
+
+  if (window === 'all') {
+    let minY = endY;
+    let minM = endM;
+    for (const tx of sorted) {
+      const m = tx.date.slice(0, 7);
+      if (m.length !== 7) continue;
+      const [ys, ms] = m.split('-');
+      const y = Number(ys);
+      const mo = Number(ms);
+      if (!Number.isFinite(y) || !Number.isFinite(mo)) continue;
+      if (y < minY || (y === minY && mo < minM)) {
+        minY = y;
+        minM = mo;
+      }
+    }
+    monthSeries = [];
+    let y = minY;
+    let m = minM;
+    while (compareYearMonth(y, m, endY, endM) <= 0) {
+      const monthKey = `${y}-${`${m}`.padStart(2, '0')}`;
+      const d = new Date(y, m - 1, 1);
+      const label = d.toLocaleString('default', { month: 'short', year: '2-digit' });
+      monthSeries.push({ year: y, month: m, monthKey, label });
+      const next = incrementMonth(y, m);
+      y = next.year;
+      m = next.month;
+    }
+    if (monthSeries.length === 0) {
+      const monthKey = `${endY}-${`${endM}`.padStart(2, '0')}`;
+      const d = new Date(endY, endM - 1, 1);
+      monthSeries.push({
+        year: endY,
+        month: endM,
+        monthKey,
+        label: d.toLocaleString('default', { month: 'short', year: '2-digit' }),
+      });
+    }
+  } else {
+    monthSeries = monthKeysFromWindow(now, window);
+  }
+
+  const running = new Map<string, number>();
+  for (const account of state.accounts) {
+    running.set(account.id, Number(account.openingBalance.toFixed(2)));
+  }
+
+  let txIdx = 0;
+  const result: NetWorthSeriesPoint[] = [];
+  const lastIdx = monthSeries.length - 1;
+
+  for (let mi = 0; mi < monthSeries.length; mi++) {
+    const { year, month, monthKey, label } = monthSeries[mi]!;
+    /** Final point must match full ledger (same as getFinanceSummary), including post–month-end dated txs. */
+    const cutoff = mi === lastIdx ? '9999-12-31' : lastDayOfMonthIso(year, month);
+    while (txIdx < sorted.length && sorted[txIdx]!.date <= cutoff) {
+      const tx = sorted[txIdx]!;
+      const prev = running.get(tx.accountId) ?? 0;
+      running.set(tx.accountId, Number((prev + tx.amount).toFixed(2)));
+      txIdx += 1;
+    }
+
+    let assets = 0;
+    let liabilities = 0;
+    let netWorth = 0;
+    for (const account of state.accounts) {
+      const bal = running.get(account.id) ?? 0;
+      netWorth += bal;
+      assets += Math.max(0, bal);
+      liabilities += Math.min(0, bal);
+    }
+
+    result.push({
+      monthKey,
+      label,
+      netWorth: Number(netWorth.toFixed(2)),
+      assets: Number(assets.toFixed(2)),
+      liabilities: Number(liabilities.toFixed(2)),
+    });
+  }
+
+  return result;
+}
+
+function compareYearMonth(aY: number, aM: number, bY: number, bM: number): number {
+  return aY * 12 + aM - (bY * 12 + bM);
+}
+
+function incrementMonth(y: number, m: number): { year: number; month: number } {
+  if (m >= 12) return { year: y + 1, month: 1 };
+  return { year: y, month: m + 1 };
 }
 
 export function getFinanceSummary(state: FinanceState): FinanceSummary {
