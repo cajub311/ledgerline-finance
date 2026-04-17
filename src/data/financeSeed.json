@@ -1,5 +1,8 @@
 {
   "householdName": "Ledgerline",
+  "preferences": {
+    "forecastLowBalanceThreshold": 500
+  },
   "accounts": [
     {
       "id": "acct-wf-checking",

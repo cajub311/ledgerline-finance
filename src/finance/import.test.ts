@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parseDelimitedStatement, parseStatementText } from './import.shared';
+import {
+  parseDelimitedStatement,
+  parseDelimitedWithMapping,
+  parseStatementText,
+  suggestColumnRoles,
+} from './import.shared';
 
 test('parses Wells Fargo-style CSV rows', () => {
   const rows = parseDelimitedStatement(
@@ -26,4 +31,19 @@ test('parses PDF statement text heuristics', () => {
   assert.equal(batch.rows.length, 2);
   assert.equal(batch.rows[0]?.payee, 'Shell');
   assert.equal(batch.rows[0]?.amount, -46.18);
+});
+
+test('CSV wizard mapping parses debit/credit columns', () => {
+  const csv = ['When,Memo,Out,In', '04/05/2026,Payroll,,3920.00', '04/04/2026,Uber,12.34,'].join('\n');
+  const headers = ['When', 'Memo', 'Out', 'In'];
+  const roles = suggestColumnRoles(headers);
+  assert.equal(roles[0], 'date');
+  assert.equal(roles[1], 'payee');
+  assert.ok(roles.includes('debit'));
+  assert.ok(roles.includes('credit'));
+
+  const rows = parseDelimitedWithMapping(csv, roles);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0]?.amount, 3920);
+  assert.equal(rows[1]?.amount, -12.34);
 });

@@ -3,10 +3,14 @@ import { CATEGORY_ICONS, CATEGORY_OPTIONS, cycleCategory, normalizeCategory } fr
 import type {
   Budget,
   BudgetStatus,
+  CashFlowProjection,
+  CashFlowProjectionPoint,
   CategoryBreakdownItem,
+  DetectedRecurringIncome,
   DetectedSubscription,
   FinanceAccount,
   FinancialGoal,
+  FinancePreferences,
   FinanceState,
   FinanceSummary,
   FinanceTransaction,
@@ -18,6 +22,21 @@ import type {
   ParsedStatementRow,
   TopMerchantItem,
 } from './types';
+
+const DEFAULT_PREFERENCES: FinancePreferences = {
+  forecastLowBalanceThreshold: 500,
+};
+
+function mergePreferences(partial?: Partial<FinancePreferences> | null): FinancePreferences {
+  return {
+    forecastLowBalanceThreshold:
+      typeof partial?.forecastLowBalanceThreshold === 'number' &&
+      Number.isFinite(partial.forecastLowBalanceThreshold) &&
+      partial.forecastLowBalanceThreshold >= 0
+        ? partial.forecastLowBalanceThreshold
+        : DEFAULT_PREFERENCES.forecastLowBalanceThreshold,
+  };
+}
 
 function createId(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`;
@@ -94,6 +113,9 @@ export function createFinanceState(): FinanceState {
     imports,
     budgets,
     goals,
+    preferences: mergePreferences(
+      (seedData as { preferences?: Partial<FinancePreferences> }).preferences,
+    ),
   };
 }
 
@@ -115,6 +137,7 @@ export function rehydrateFinanceState(snapshot: Partial<FinanceState> | null | u
     imports: cloneImports(snapshot.imports?.length ? (snapshot.imports as ImportRecord[]) : seed.imports),
     budgets: cloneBudgets(snapshot.budgets ?? seed.budgets),
     goals: cloneGoals(snapshot.goals ?? seed.goals),
+    preferences: mergePreferences(snapshot.preferences ?? seed.preferences),
   };
 }
 
@@ -580,6 +603,202 @@ export function detectSubscriptions(transactions: FinanceTransaction[]): Detecte
   }
 
   return subscriptions.sort((a, b) => b.annualCost - a.annualCost);
+}
+
+export function detectRecurringIncome(transactions: FinanceTransaction[]): DetectedRecurringIncome[] {
+  const byPayee: Record<string, FinanceTransaction[]> = {};
+
+  for (const tx of transactions) {
+    if (tx.amount <= 0) continue;
+    const key = tx.payee.trim().toLowerCase();
+    if (!byPayee[key]) byPayee[key] = [];
+    byPayee[key].push(tx);
+  }
+
+  const incomes: DetectedRecurringIncome[] = [];
+
+  for (const [, txs] of Object.entries(byPayee)) {
+    if (txs.length < 2) continue;
+
+    const amounts = txs.map((tx) => tx.amount).sort((a, b) => a - b);
+    const median = amounts[Math.floor(amounts.length / 2)];
+    const consistent = amounts.every((a) => Math.abs(a - median) <= 2);
+
+    if (!consistent) continue;
+
+    const dates = txs.map((tx) => new Date(tx.date).getTime()).sort((a, b) => a - b);
+    const gaps: number[] = [];
+    for (let i = 1; i < dates.length; i++) {
+      gaps.push((dates[i] - dates[i - 1]) / (1000 * 60 * 60 * 24));
+    }
+    const avgGap = gaps.reduce((s, g) => s + g, 0) / gaps.length;
+
+    let frequency: DetectedRecurringIncome['frequency'];
+    let annualTotal: number;
+
+    if (avgGap >= 6 && avgGap <= 10) {
+      frequency = 'weekly';
+      annualTotal = median * 52;
+    } else if (avgGap >= 25 && avgGap <= 40) {
+      frequency = 'monthly';
+      annualTotal = median * 12;
+    } else if (avgGap >= 300 && avgGap <= 400) {
+      frequency = 'annual';
+      annualTotal = median;
+    } else {
+      continue;
+    }
+
+    const sorted = [...txs].sort((a, b) => b.date.localeCompare(a.date));
+    incomes.push({
+      payee: sorted[0].payee,
+      amount: Number(median.toFixed(2)),
+      frequency,
+      lastReceived: sorted[0].date,
+      annualTotal: Number(annualTotal.toFixed(2)),
+      occurrences: txs.length,
+    });
+  }
+
+  return incomes.sort((a, b) => b.annualTotal - a.annualTotal);
+}
+
+function monthSpendExcludingTransfer(transactions: FinanceTransaction[], year: number, month: number): number {
+  const monthKey = `${year}-${`${month}`.padStart(2, '0')}`;
+  return Number(
+    transactions
+      .filter((tx) => tx.date.startsWith(monthKey) && tx.amount < 0 && tx.category !== 'Transfer')
+      .reduce((sum, tx) => sum + Math.abs(tx.amount), 0)
+      .toFixed(2),
+  );
+}
+
+/** Conservative discretionary buffer: liquid cash minus pace-adjusted rest-of-month spend. */
+export function getSafeToSpend(state: FinanceState): number {
+  const summary = getFinanceSummary(state);
+  const liquid = summary.liquidCash;
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const dayOfMonth = now.getDate();
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const spendSoFar = monthSpendExcludingTransfer(state.transactions, year, month);
+
+  if (dayOfMonth <= 0 || daysInMonth <= 0) return Number(Math.max(0, liquid).toFixed(2));
+
+  const projectedMonthSpend = (spendSoFar / dayOfMonth) * daysInMonth;
+  const projectedRest = Math.max(0, projectedMonthSpend - spendSoFar);
+  const raw = liquid - projectedRest;
+  return Number(Math.max(0, raw).toFixed(2));
+}
+
+export interface FinancialHealthScore {
+  score: number;
+  label: string;
+}
+
+/** Composite 0–100 score from budgets, savings rate, categorization, and review status. */
+export function getFinancialHealthScore(state: FinanceState): FinancialHealthScore {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  let score = 100;
+
+  const budgetStatuses = getBudgetStatus(state, year, month);
+  const over = budgetStatuses.filter((b) => b.status === 'over').length;
+  score -= Math.min(36, over * 12);
+
+  const uncategorized = state.transactions.filter(
+    (tx) => !tx.category || tx.category === 'Other',
+  ).length;
+  score -= Math.min(18, uncategorized * 2);
+
+  const monthKey = `${year}-${`${month}`.padStart(2, '0')}`;
+  const unreviewed = state.transactions.filter(
+    (tx) => tx.date.startsWith(monthKey) && !tx.reviewed,
+  ).length;
+  score -= Math.min(15, unreviewed);
+
+  const savingsRate = getSavingsRate(state);
+  if (savingsRate >= 20) score += 5;
+  else if (savingsRate < 5 && getFinanceSummary(state).monthIncome > 0) score -= 8;
+
+  score = Math.round(Math.min(100, Math.max(0, score)));
+
+  let label = 'Solid';
+  if (score >= 85) label = 'Strong';
+  else if (score >= 70) label = 'Good';
+  else if (score >= 50) label = 'Fair';
+  else label = 'Needs attention';
+
+  return { score, label };
+}
+
+function subscriptionMonthlyEquivalent(sub: DetectedSubscription): number {
+  if (sub.frequency === 'monthly') return sub.amount;
+  if (sub.frequency === 'weekly') return sub.amount * (52 / 12);
+  return sub.amount / 12;
+}
+
+function incomeMonthlyEquivalent(inc: DetectedRecurringIncome): number {
+  if (inc.frequency === 'monthly') return inc.amount;
+  if (inc.frequency === 'weekly') return inc.amount * (52 / 12);
+  return inc.amount / 12;
+}
+
+export function projectCashFlow(
+  state: FinanceState,
+  horizonDays: number,
+): CashFlowProjection {
+  const summary = getFinanceSummary(state);
+  const startBalance = summary.liquidCash;
+  const threshold = state.preferences.forecastLowBalanceThreshold;
+  const subs = detectSubscriptions(state.transactions);
+  const incomes = detectRecurringIncome(state.transactions);
+
+  const monthlyOut = subs.reduce((sum, s) => sum + subscriptionMonthlyEquivalent(s), 0);
+  const monthlyIn = incomes.reduce((sum, i) => sum + incomeMonthlyEquivalent(i), 0);
+  const dailyNet = (monthlyIn - monthlyOut) / 30.44;
+
+  const points: CashFlowProjectionPoint[] = [];
+  const belowThresholdDates: string[] = [];
+
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+
+  for (let d = 0; d <= Math.max(1, horizonDays); d += 1) {
+    const day = new Date(start);
+    day.setDate(start.getDate() + d);
+    const iso = toIsoDateStatic(day);
+    const balance = Number((startBalance + dailyNet * d).toFixed(2));
+    points.push({ date: iso, balance });
+    if (threshold > 0 && balance < threshold) {
+      belowThresholdDates.push(iso);
+    }
+  }
+
+  return {
+    points,
+    belowThresholdDates,
+    startBalance,
+    horizonDays: Math.max(1, horizonDays),
+  };
+}
+
+function toIsoDateStatic(date: Date): string {
+  const y = date.getFullYear();
+  const m = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export function setForecastLowBalanceThreshold(state: FinanceState, threshold: number): FinanceState {
+  const n = Number(threshold);
+  const safe = Number.isFinite(n) && n >= 0 ? n : state.preferences.forecastLowBalanceThreshold;
+  return {
+    ...state,
+    preferences: { ...state.preferences, forecastLowBalanceThreshold: safe },
+  };
 }
 
 // ─── Budget management ────────────────────────────────────────────────────────

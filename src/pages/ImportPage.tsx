@@ -7,7 +7,15 @@ import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { buildTransactionsCsv } from '../finance/export';
 import { parseStatementBlob } from '../finance/import';
-import { parseStatementText } from '../finance/import.shared';
+import {
+  mappingIsComplete,
+  parseDelimitedWithMapping,
+  parseStatementText,
+  previewDelimitedCsv,
+  rolesToMapping,
+  suggestColumnRoles,
+  type WizardColumnRole,
+} from '../finance/import.shared';
 import {
   applyImportedBatch,
   getAccountsWithBalances,
@@ -34,9 +42,113 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
   const [message, setMessage] = useState('');
   const [tone, setTone] = useState<'info' | 'success' | 'danger'>('info');
 
+  const [wizardCsvText, setWizardCsvText] = useState('');
+  const [wizardSourceLabel, setWizardSourceLabel] = useState('');
+  const [wizardRoles, setWizardRoles] = useState<WizardColumnRole[]>([]);
+  const [wizardHeaders, setWizardHeaders] = useState<string[]>([]);
+  const [wizardPreviewRows, setWizardPreviewRows] = useState<string[][]>([]);
+
+  const webOnly = Platform.OS === 'web';
+
   const notify = (text: string, kind: 'info' | 'success' | 'danger' = 'info') => {
     setMessage(text);
     setTone(kind);
+  };
+
+  const wizardMapping = useMemo(
+    () => rolesToMapping(wizardHeaders.length, wizardRoles),
+    [wizardHeaders.length, wizardRoles],
+  );
+  const wizardReady = mappingIsComplete(wizardMapping);
+  const wizardParsedCount = useMemo(() => {
+    if (!wizardReady || !wizardCsvText.trim()) return 0;
+    return parseDelimitedWithMapping(wizardCsvText, wizardRoles).length;
+  }, [wizardCsvText, wizardRoles, wizardReady]);
+
+  const ROLE_OPTIONS: ReadonlyArray<{ value: WizardColumnRole; label: string }> = [
+    { value: 'ignore', label: 'Ignore' },
+    { value: 'date', label: 'Date' },
+    { value: 'payee', label: 'Description / payee' },
+    { value: 'amount', label: 'Amount (signed)' },
+    { value: 'debit', label: 'Debit' },
+    { value: 'credit', label: 'Credit' },
+    { value: 'category', label: 'Category' },
+  ];
+
+  const loadWizardFromText = (text: string, sourceLabel: string) => {
+    const trimmed = text.trim();
+    const preview = previewDelimitedCsv(trimmed, 10);
+    if (!preview) {
+      notify('Need a header row plus at least one data row.', 'danger');
+      return;
+    }
+    setWizardCsvText(trimmed);
+    setWizardSourceLabel(sourceLabel);
+    setWizardHeaders(preview.headers);
+    setWizardPreviewRows(preview.rows);
+    setWizardRoles(suggestColumnRoles(preview.headers));
+    notify(`Loaded ${preview.headers.length} columns — confirm mappings below.`, 'info');
+  };
+
+  const handleWizardCsvFile = async () => {
+    if (!webOnly) {
+      notify('CSV wizard file pick works on the web.', 'danger');
+      return;
+    }
+    try {
+      setBusy(true);
+      const files = await pickWebStatementFiles();
+      const file = files.find((f) => f.name.toLowerCase().endsWith('.csv'));
+      if (!file) {
+        notify('Select a .csv file for the mapping wizard.', 'danger');
+        return;
+      }
+      const text = await file.text();
+      loadWizardFromText(text, file.name);
+    } catch (error) {
+      notify(`Could not read file: ${getErrorMessage(error)}`, 'danger');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clearWizard = () => {
+    setWizardCsvText('');
+    setWizardSourceLabel('');
+    setWizardRoles([]);
+    setWizardHeaders([]);
+    setWizardPreviewRows([]);
+  };
+
+  const applyWizardImport = () => {
+    if (!accountId) {
+      notify('Add an account first.', 'danger');
+      return;
+    }
+    if (!wizardReady) {
+      notify('Map date, description, and either amount or debit/credit columns.', 'danger');
+      return;
+    }
+    const rows = parseDelimitedWithMapping(wizardCsvText, wizardRoles);
+    if (rows.length === 0) {
+      notify('No valid rows after mapping — check your columns.', 'danger');
+      return;
+    }
+    const batch = {
+      format: 'csv' as const,
+      rows,
+      sourceLabel: wizardSourceLabel || 'csv-wizard',
+      notes: ['Imported via CSV column mapping wizard.'],
+    };
+    const before = state.transactions.length;
+    const next = applyImportedBatch(state, accountId, batch);
+    const added = next.transactions.length - before;
+    onStateChange(next);
+    clearWizard();
+    notify(
+      `Imported ${added} transaction${added === 1 ? '' : 's'}${rows.length - added > 0 ? `, ${rows.length - added} duplicate${rows.length - added === 1 ? '' : 's'} skipped` : ''}.`,
+      'success',
+    );
   };
 
   const handleFilePick = async () => {
@@ -145,8 +257,6 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
     }
   };
 
-  const webOnly = Platform.OS === 'web';
-
   return (
     <View style={{ gap: spacing.lg }}>
       <View>
@@ -204,6 +314,102 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
             options={accounts.map((a) => ({ value: a.id, label: `${a.name} · ${formatCurrency(a.currentBalance)}` }))}
           />
         )}
+      </Card>
+
+      <Card title="CSV import wizard" eyebrow="Preview · map columns · dedupe">
+        <Text style={{ color: palette.textMuted, fontSize: typography.small, lineHeight: 19, marginBottom: spacing.md }}>
+          For bank CSVs (Wells Fargo, Chase, etc.): we auto-suggest column roles. Preview the first 10 rows, adjust
+          mappings, then import. Duplicates are skipped using the same date + payee + amount key as quick import.
+        </Text>
+        <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap', marginBottom: spacing.md }}>
+          <Button
+            label={busy ? 'Loading…' : 'Load CSV file'}
+            onPress={handleWizardCsvFile}
+            disabled={busy || !webOnly || !accountId}
+            variant="secondary"
+          />
+          <Button
+            label="Load pasted CSV below"
+            onPress={() => {
+              const t = pasted.trim();
+              if (!t) {
+                notify('Paste CSV into the box in “Paste statement text” first, or use Load CSV file.', 'danger');
+                return;
+              }
+              loadWizardFromText(t, 'pasted-csv-wizard');
+            }}
+            disabled={!accountId}
+            variant="ghost"
+          />
+          {wizardHeaders.length > 0 ? (
+            <Button label="Clear wizard" onPress={clearWizard} variant="ghost" />
+          ) : null}
+        </View>
+
+        {wizardHeaders.length > 0 ? (
+          <View style={{ gap: spacing.md }}>
+            <Text style={{ color: palette.textSubtle, fontSize: typography.micro, fontWeight: '700' }}>
+              Column mapping
+            </Text>
+            {wizardHeaders.map((header, colIdx) => (
+              <Select
+                key={`${header}-${colIdx}`}
+                label={header || `Column ${colIdx + 1}`}
+                value={wizardRoles[colIdx] ?? 'ignore'}
+                onChange={(value) => {
+                  setWizardRoles((prev) => {
+                    const next = [...prev];
+                    while (next.length < wizardHeaders.length) {
+                      next.push('ignore');
+                    }
+                    next[colIdx] = value;
+                    return next;
+                  });
+                }}
+                options={ROLE_OPTIONS}
+              />
+            ))}
+
+            <Text style={{ color: palette.textSubtle, fontSize: typography.micro, fontWeight: '700' }}>
+              Preview (first 10 rows)
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator>
+              <View>
+                <View style={[styles.tableRow, { borderColor: palette.borderSoft }]}>
+                  {wizardHeaders.map((h, i) => (
+                    <Text key={`h-${i}`} style={[styles.tableCell, { color: palette.primary, fontWeight: '800' }]}>
+                      {h || '—'}
+                    </Text>
+                  ))}
+                </View>
+                {wizardPreviewRows.map((row, ri) => (
+                  <View
+                    key={`r-${ri}`}
+                    style={[styles.tableRow, { borderColor: palette.borderSoft, backgroundColor: palette.surfaceSunken }]}
+                  >
+                    {wizardHeaders.map((_, ci) => (
+                      <Text key={`c-${ri}-${ci}`} style={[styles.tableCell, { color: palette.text }]}>
+                        {row[ci] ?? ''}
+                      </Text>
+                    ))}
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
+
+            <Text style={{ color: wizardReady ? palette.textMuted : palette.warning, fontSize: typography.small }}>
+              {wizardReady
+                ? `Ready to import ${wizardParsedCount} parsed row${wizardParsedCount === 1 ? '' : 's'} (duplicates will be skipped on commit).`
+                : 'Map at least: Date, Description, and either a single Amount column or separate Debit/Credit columns.'}
+            </Text>
+            <Button
+              label={busy ? 'Working…' : 'Import with these mappings'}
+              onPress={applyWizardImport}
+              disabled={!wizardReady || busy || !accountId}
+              fullWidth
+            />
+          </View>
+        ) : null}
       </Card>
 
       <View style={styles.grid}>
@@ -300,5 +506,16 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     paddingVertical: 10,
     borderBottomWidth: 1,
+  },
+  tableRow: {
+    flexDirection: 'row',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  tableCell: {
+    minWidth: 120,
+    maxWidth: 220,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    fontSize: typography.micro,
   },
 });

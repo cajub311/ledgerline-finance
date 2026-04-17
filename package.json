@@ -26,6 +26,7 @@
     "react-dom": "19.2.0",
     "react-native": "0.83.2",
     "react-native-web": "^0.21.0",
+    "recharts": "^2.15.4",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

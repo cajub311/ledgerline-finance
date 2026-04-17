@@ -2,11 +2,11 @@ import { inferCategory } from './categories';
 import type { ParsedStatementBatch, ParsedStatementRow } from './types';
 
 const HEADER_ALIASES: Record<string, string[]> = {
-  date: ['date', 'transaction date', 'posted date', 'entry date'],
-  payee: ['payee', 'merchant', 'description', 'name', 'details', 'transaction description'],
+  date: ['date', 'when', 'day', 'transaction date', 'posted date', 'entry date'],
+  payee: ['payee', 'merchant', 'description', 'memo', 'name', 'details', 'transaction description'],
   amount: ['amount', 'transaction amount'],
-  debit: ['debit', 'withdrawal', 'outflow'],
-  credit: ['credit', 'deposit', 'inflow'],
+  debit: ['debit', 'withdrawal', 'outflow', 'out', 'money out', 'withdrawals'],
+  credit: ['credit', 'deposit', 'inflow', 'in', 'money in', 'deposits'],
   category: ['category', 'spending category', 'memo category'],
   notes: ['notes', 'memo', 'memo/notes', 'original statement', 'statement', 'reference'],
   type: ['type', 'transaction type'],
@@ -125,6 +125,166 @@ function splitCsvLine(line: string): string[] {
 
 function normalizeHeaders(headers: string[]): string[] {
   return headers.map((header) => header.trim().toLowerCase());
+}
+
+export type WizardColumnRole =
+  | 'date'
+  | 'payee'
+  | 'amount'
+  | 'debit'
+  | 'credit'
+  | 'category'
+  | 'ignore';
+
+export interface CsvPreviewResult {
+  headers: string[];
+  rows: string[][];
+}
+
+/** First line = headers; returns up to `maxDataRows` data rows (trimmed cells). */
+export function previewDelimitedCsv(text: string, maxDataRows = 10): CsvPreviewResult | null {
+  const lines = text
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length < 2) {
+    return null;
+  }
+
+  const headers = splitCsvLine(lines[0]).map((cell) => cell.trim());
+  const rows = lines
+    .slice(1, 1 + maxDataRows)
+    .map((line) => splitCsvLine(line).map((cell) => cell.trim()));
+
+  return { headers, rows };
+}
+
+export function suggestColumnRoles(headers: string[]): WizardColumnRole[] {
+  const normalized = normalizeHeaders(headers);
+  const roles: WizardColumnRole[] = normalized.map(() => 'ignore');
+
+  const assignFirst = (aliases: string[], role: WizardColumnRole) => {
+    const idx = pickHeaderIndex(normalized, aliases);
+    if (idx >= 0 && roles[idx] === 'ignore') {
+      roles[idx] = role;
+    }
+  };
+
+  assignFirst(HEADER_ALIASES.date, 'date');
+  assignFirst(HEADER_ALIASES.payee, 'payee');
+  assignFirst(HEADER_ALIASES.amount, 'amount');
+  assignFirst(HEADER_ALIASES.debit, 'debit');
+  assignFirst(HEADER_ALIASES.credit, 'credit');
+  assignFirst(HEADER_ALIASES.category, 'category');
+
+  return roles;
+}
+
+export interface WizardColumnMapping {
+  /** Column index for each role; -1 if unused */
+  date: number;
+  payee: number;
+  amount: number;
+  debit: number;
+  credit: number;
+  category: number;
+}
+
+export function rolesToMapping(headersLength: number, roles: WizardColumnRole[]): WizardColumnMapping {
+  const m: WizardColumnMapping = {
+    date: -1,
+    payee: -1,
+    amount: -1,
+    debit: -1,
+    credit: -1,
+    category: -1,
+  };
+
+  for (let i = 0; i < Math.min(headersLength, roles.length); i += 1) {
+    const r = roles[i];
+    if (r === 'ignore') continue;
+    if (r === 'date' && m.date < 0) m.date = i;
+    else if (r === 'payee' && m.payee < 0) m.payee = i;
+    else if (r === 'amount' && m.amount < 0) m.amount = i;
+    else if (r === 'debit' && m.debit < 0) m.debit = i;
+    else if (r === 'credit' && m.credit < 0) m.credit = i;
+    else if (r === 'category' && m.category < 0) m.category = i;
+  }
+
+  return m;
+}
+
+export function mappingIsComplete(m: WizardColumnMapping): boolean {
+  if (m.date < 0 || m.payee < 0) return false;
+  if (m.amount >= 0) return true;
+  return m.debit >= 0 || m.credit >= 0;
+}
+
+export function parseDelimitedWithMapping(text: string, roles: WizardColumnRole[]): ParsedStatementRow[] {
+  const preview = previewDelimitedCsv(text, 100_000);
+  if (!preview) {
+    return [];
+  }
+
+  const mapping = rolesToMapping(preview.headers.length, roles);
+  if (!mappingIsComplete(mapping)) {
+    return [];
+  }
+
+  const lines = text
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length < 2) {
+    return [];
+  }
+
+  const syntheticHeaders = ['date', 'payee', 'amount'];
+  if (mapping.category >= 0) {
+    syntheticHeaders.push('category');
+  }
+
+  const out: ParsedStatementRow[] = [];
+
+  for (let li = 1; li < lines.length; li += 1) {
+    const cells = splitCsvLine(lines[li]).map((c) => c.trim());
+    const dateVal = cells[mapping.date] ?? '';
+    const payeeVal = cells[mapping.payee] ?? '';
+    let amountVal: unknown = '';
+
+    if (mapping.amount >= 0) {
+      amountVal = cells[mapping.amount] ?? '';
+    } else {
+      const debitRaw = mapping.debit >= 0 ? cells[mapping.debit] : '';
+      const creditRaw = mapping.credit >= 0 ? cells[mapping.credit] : '';
+      const creditAmount = parseAmount(creditRaw);
+      const debitAmount = parseAmount(debitRaw);
+
+      if (creditAmount != null && creditAmount !== 0) {
+        amountVal = Math.abs(creditAmount);
+      } else if (debitAmount != null && debitAmount !== 0) {
+        amountVal = -Math.abs(debitAmount);
+      } else {
+        amountVal = '';
+      }
+    }
+
+    const row: string[] = [dateVal, payeeVal, String(amountVal)];
+    if (mapping.category >= 0) {
+      row.push(cells[mapping.category] ?? '');
+    }
+
+    const parsed = rowToStatementRow(row, syntheticHeaders);
+    if (parsed) {
+      out.push(parsed);
+    }
+  }
+
+  return out;
 }
 
 function rowToStatementRow(

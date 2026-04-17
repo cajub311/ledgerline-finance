@@ -70,6 +70,26 @@ export function SettingsPage({ state, onStateChange }: SettingsPageProps) {
         />
       </Card>
 
+      <Card title="Privacy & security" eyebrow="How Ledgerline handles your data">
+        <Text style={[styles.securityLead, { color: palette.text }]}>
+          Your data never leaves your device. No accounts. No servers. No subscriptions.
+        </Text>
+        <View style={{ gap: spacing.md, marginTop: spacing.md }}>
+          <SecurityBlock
+            title="Local persistence"
+            body="Your ledger is saved in this browser (localStorage on web, AsyncStorage on native). We do not sync to a cloud database you do not control."
+          />
+          <SecurityBlock
+            title="Optional backup / restore"
+            body="Use Import → Export JSON backup to keep an offline copy. Restoring replaces the current ledger — export before restoring if you need both versions."
+          />
+          <SecurityBlock
+            title="Zero in-app telemetry"
+            body="This build does not ship product analytics or crash reporting hooks. Third-party APIs (for example PDF text extraction) may load assets from their CDN when you use those features."
+          />
+        </View>
+      </Card>
+
       <Card title="Household" eyebrow="Name">
         <Input
           label="Household or workspace name"
@@ -131,9 +151,26 @@ function Line({ label, value }: { label: string; value: string }) {
   );
 }
 
+function SecurityBlock({ title, body }: { title: string; body: string }) {
+  const { palette } = useTheme();
+  return (
+    <View>
+      <Text style={{ color: palette.text, fontSize: typography.small, fontWeight: '800' }}>{title}</Text>
+      <Text style={{ color: palette.textMuted, fontSize: typography.micro, marginTop: 4, lineHeight: 17 }}>
+        {body}
+      </Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   title: { fontSize: typography.display, fontWeight: '800' },
   subtitle: { fontSize: typography.small, marginTop: 4 },
+  securityLead: {
+    fontSize: typography.small,
+    fontWeight: '800',
+    lineHeight: 20,
+  },
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',

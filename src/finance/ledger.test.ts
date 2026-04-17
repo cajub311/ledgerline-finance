@@ -8,6 +8,7 @@ import {
   createFinanceState,
   getBudgetStatus,
   getFinanceSummary,
+  getSafeToSpend,
   rotateTransactionCategory,
   setBudget,
 } from './ledger';
@@ -19,6 +20,15 @@ test('summary reflects the seeded ledger', () => {
   assert.ok(summary.netWorth > 0);
   assert.ok(summary.monthSpend > 0);
   assert.ok(summary.importedFiles > 0);
+  assert.ok(state.preferences.forecastLowBalanceThreshold >= 0);
+});
+
+test('safe to spend is non-negative and bounded by liquid cash', () => {
+  const state = createFinanceState();
+  const summary = getFinanceSummary(state);
+  const safe = getSafeToSpend(state);
+  assert.ok(safe >= 0);
+  assert.ok(safe <= summary.liquidCash + 0.01);
 });
 
 test('manual transactions are added to the selected account', () => {

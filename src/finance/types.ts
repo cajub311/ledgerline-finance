@@ -51,6 +51,11 @@ export interface FinancialGoal {
   createdAt: string;
 }
 
+export interface FinancePreferences {
+  /** Balance threshold for cash-flow forecast warnings; 0 disables highlights */
+  forecastLowBalanceThreshold: number;
+}
+
 export interface FinanceState {
   version: 1;
   householdName: string;
@@ -60,6 +65,7 @@ export interface FinanceState {
   imports: ImportRecord[];
   budgets: Budget[];
   goals: FinancialGoal[];
+  preferences: FinancePreferences;
 }
 
 export interface ManualTransactionDraft {
@@ -138,4 +144,26 @@ export interface GoalStats {
   remaining: number;
   daysLeft: number;
   monthlyRequired: number;
+}
+
+export interface DetectedRecurringIncome {
+  payee: string;
+  amount: number;
+  frequency: 'weekly' | 'monthly' | 'annual';
+  lastReceived: string;
+  annualTotal: number;
+  occurrences: number;
+}
+
+export interface CashFlowProjectionPoint {
+  date: string;
+  balance: number;
+}
+
+export interface CashFlowProjection {
+  points: CashFlowProjectionPoint[];
+  /** Dates (YYYY-MM-DD) where projected balance is below threshold */
+  belowThresholdDates: string[];
+  startBalance: number;
+  horizonDays: number;
 }

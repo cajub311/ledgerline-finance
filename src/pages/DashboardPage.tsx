@@ -14,8 +14,10 @@ import {
   getCategoryBreakdown,
   getCategoryIcon,
   getFinanceSummary,
+  getFinancialHealthScore,
   getLatestTransactions,
   getMonthlyTrend,
+  getSafeToSpend,
   getSavingsRate,
   getTopMerchants,
 } from '../finance/ledger';
@@ -59,9 +61,12 @@ export function DashboardPage({ state }: DashboardPageProps) {
   }, [state.budgets]);
 
   const monthLabel = now.toLocaleString('default', { month: 'long', year: 'numeric' });
+  const monthName = now.toLocaleString('default', { month: 'long' });
   const net = summary.monthIncome - summary.monthSpend;
   const overBudget = budgetStatuses.filter((b) => b.status === 'over').length;
   const subsMonthly = subs.filter((s) => s.frequency === 'monthly').reduce((s, c) => s + c.amount, 0);
+  const safeToSpend = useMemo(() => getSafeToSpend(state), [state]);
+  const health = useMemo(() => getFinancialHealthScore(state), [state]);
 
   return (
     <View style={{ gap: spacing.lg }}>
@@ -73,6 +78,38 @@ export function DashboardPage({ state }: DashboardPageProps) {
             ? `${summary.unreviewedCount} transaction${summary.unreviewedCount === 1 ? '' : 's'} to review this month.`
             : 'All transactions reviewed. Nice work.'}
         </Text>
+      </View>
+
+      <View
+        style={[
+          styles.privacyRibbon,
+          { backgroundColor: palette.primarySoft, borderColor: palette.primary },
+        ]}
+      >
+        <Text style={[styles.privacyTitle, { color: palette.primary }]}>
+          Your data never leaves your device. No accounts. No servers. No subscriptions.
+        </Text>
+        <Text style={[styles.privacyBody, { color: palette.textMuted }]}>
+          Ledgerline runs in your browser; your ledger is stored locally. See Settings → Privacy & security for
+          details.
+        </Text>
+      </View>
+
+      <View style={styles.heroRow}>
+        <Card title="Safe to spend" eyebrow="Liquid cash minus pace-adjusted rest-of-month spend" style={styles.heroMain}>
+          <Text style={[styles.heroAmount, { color: palette.text }]}>{formatCurrency(safeToSpend)}</Text>
+          <Text style={{ color: palette.textSubtle, fontSize: typography.small, marginTop: 6, lineHeight: 19 }}>
+            Conservative buffer after projecting spending for the rest of {monthName} from your pace so far. Not
+            financial advice.
+          </Text>
+        </Card>
+        <Card title="Financial health" eyebrow="Composite score" style={styles.heroSide}>
+          <Text style={[styles.healthScore, { color: palette.primary }]}>{health.score}</Text>
+          <Text style={{ color: palette.textMuted, fontWeight: '700', marginTop: 4 }}>{health.label}</Text>
+          <Text style={{ color: palette.textSubtle, fontSize: typography.micro, marginTop: 8, lineHeight: 16 }}>
+            Based on budgets, savings rate, categorization, and review status.
+          </Text>
+        </Card>
       </View>
 
       <View style={styles.statsGrid}>
@@ -257,6 +294,44 @@ const styles = StyleSheet.create({
   subhead: {
     fontSize: typography.body,
     marginTop: 4,
+  },
+  privacyRibbon: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    padding: spacing.md,
+    gap: 4,
+  },
+  privacyTitle: {
+    fontSize: typography.small,
+    fontWeight: '800',
+    lineHeight: 20,
+  },
+  privacyBody: {
+    fontSize: typography.micro,
+    lineHeight: 17,
+  },
+  heroRow: {
+    flexDirection: 'row',
+    gap: spacing.lg,
+    flexWrap: 'wrap',
+  },
+  heroMain: {
+    flex: 2,
+    minWidth: 280,
+  },
+  heroSide: {
+    flex: 1,
+    minWidth: 220,
+  },
+  heroAmount: {
+    fontSize: 36,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+  healthScore: {
+    fontSize: 48,
+    fontWeight: '800',
+    lineHeight: 52,
   },
   statsGrid: {
     flexDirection: 'row',

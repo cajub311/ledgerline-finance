@@ -18,6 +18,7 @@ import { useDebouncedFinancePersistence } from './hooks/useDebouncedFinancePersi
 import { AccountsPage } from './pages/AccountsPage';
 import { BudgetsPage } from './pages/BudgetsPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { ForecastPage } from './pages/ForecastPage';
 import { GoalsPage } from './pages/GoalsPage';
 import { ImportPage } from './pages/ImportPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -26,12 +27,21 @@ import { ThemeProvider, useTheme } from './theme/ThemeContext';
 import { spacing, typography } from './theme/tokens';
 import { getErrorMessage } from './utils/format';
 
-type Tab = 'dashboard' | 'transactions' | 'budgets' | 'goals' | 'accounts' | 'import' | 'settings';
+type Tab =
+  | 'dashboard'
+  | 'transactions'
+  | 'budgets'
+  | 'forecast'
+  | 'goals'
+  | 'accounts'
+  | 'import'
+  | 'settings';
 
 const TAB_ROUTES: ReadonlyArray<NavItem<Tab>> = [
   { value: 'dashboard', label: 'Dashboard', icon: '🏠' },
   { value: 'transactions', label: 'Transactions', icon: '🧾' },
   { value: 'budgets', label: 'Budgets', icon: '🎯' },
+  { value: 'forecast', label: 'Forecast', icon: '📈' },
   { value: 'goals', label: 'Goals', icon: '🚀' },
   { value: 'accounts', label: 'Accounts', icon: '🏦' },
   { value: 'import', label: 'Import', icon: '📥' },
@@ -165,6 +175,8 @@ function PageBody({
       return <TransactionsPage state={state} onStateChange={onStateChange} />;
     case 'budgets':
       return <BudgetsPage state={state} onStateChange={onStateChange} />;
+    case 'forecast':
+      return <ForecastPage state={state} onStateChange={onStateChange} />;
     case 'goals':
       return <GoalsPage state={state} onStateChange={onStateChange} />;
     case 'accounts':
