@@ -13,7 +13,7 @@
     "build": "expo export -p web",
     "build:web": "npm run build",
     "vercel-build": "npm run build",
-    "test": "node --import tsx --test src/finance/import.test.ts src/finance/ledger.test.ts src/finance/backup.test.ts",
+    "test": "node --import tsx --test src/finance/import.test.ts src/finance/ledger.test.ts src/finance/backup.test.ts src/finance/rules.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
