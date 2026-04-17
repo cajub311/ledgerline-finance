@@ -1,11 +1,17 @@
-import { useMemo, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
-import { buildTransactionsCsv } from '../finance/export';
+import {
+  buildAccountOfx,
+  buildAccountQif,
+  buildMultiAccountQif,
+  buildTransactionsCsv,
+} from '../finance/export';
 import { parseStatementBlob } from '../finance/import';
 import {
   mappingIsComplete,
@@ -24,13 +30,21 @@ import { parseFinanceBackupJson, serializeFinanceState } from '../finance/backup
 import type { FinanceState } from '../finance/types';
 import { useTheme } from '../theme/ThemeContext';
 import { radius, spacing, typography } from '../theme/tokens';
-import { formatCurrency, getErrorMessage } from '../utils/format';
+import {
+  downloadBlob,
+  downloadText,
+  formatCurrency,
+  formatIsoDate,
+  getErrorMessage,
+} from '../utils/format';
 import { pickWebStatementFiles } from '../utils/webFilePicker';
 
 interface ImportPageProps {
   state: FinanceState;
   onStateChange: (next: FinanceState) => void;
 }
+
+type ExportScope = 'all' | 'month' | 'account';
 
 export function ImportPage({ state, onStateChange }: ImportPageProps) {
   const { palette } = useTheme();
@@ -41,6 +55,9 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
   const [pasted, setPasted] = useState('');
   const [message, setMessage] = useState('');
   const [tone, setTone] = useState<'info' | 'success' | 'danger'>('info');
+  const [lastImport, setLastImport] = useState<{ snapshot: FinanceState; count: number } | null>(
+    null,
+  );
 
   const [wizardCsvText, setWizardCsvText] = useState('');
   const [wizardSourceLabel, setWizardSourceLabel] = useState('');
@@ -48,7 +65,24 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
   const [wizardHeaders, setWizardHeaders] = useState<string[]>([]);
   const [wizardPreviewRows, setWizardPreviewRows] = useState<string[][]>([]);
 
+  // Export options
+  const [exportScope, setExportScope] = useState<ExportScope>('all');
+  const [exportMonth, setExportMonth] = useState<string>(() => formatIsoDate().slice(0, 7));
+  const [exportAccount, setExportAccount] = useState<string>(accounts[0]?.id ?? '');
+
+  // Drag/drop
+  const [dropActive, setDropActive] = useState(false);
+  const dropZoneRef = useRef<View>(null);
+
   const webOnly = Platform.OS === 'web';
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    // Keep selected exportAccount valid
+    if (!accounts.find((a) => a.id === exportAccount) && accounts[0]) {
+      setExportAccount(accounts[0].id);
+    }
+  }, [accounts, exportAccount]);
 
   const notify = (text: string, kind: 'info' | 'success' | 'danger' = 'info') => {
     setMessage(text);
@@ -140,10 +174,12 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
       sourceLabel: wizardSourceLabel || 'csv-wizard',
       notes: ['Imported via CSV column mapping wizard.'],
     };
+    const snapshot = state;
     const before = state.transactions.length;
     const next = applyImportedBatch(state, accountId, batch);
     const added = next.transactions.length - before;
     onStateChange(next);
+    setLastImport({ snapshot, count: added });
     clearWizard();
     notify(
       `Imported ${added} transaction${added === 1 ? '' : 's'}${rows.length - added > 0 ? `, ${rows.length - added} duplicate${rows.length - added === 1 ? '' : 's'} skipped` : ''}.`,
@@ -151,20 +187,17 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
     );
   };
 
-  const handleFilePick = async () => {
+  const importFiles = async (files: File[]) => {
     if (!accountId) {
       notify('Add an account first.', 'danger');
       return;
     }
+    if (files.length === 0) return;
     try {
       setBusy(true);
-      const files = await pickWebStatementFiles();
-      if (files.length === 0) {
-        setBusy(false);
-        return;
-      }
       let imported = 0;
       let skipped = 0;
+      const snapshot = state;
       let workingState = state;
       for (const file of files) {
         const batch = await parseStatementBlob(file);
@@ -175,8 +208,11 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
         skipped += batch.rows.length - added;
       }
       onStateChange(workingState);
+      setLastImport({ snapshot, count: imported });
       notify(
-        `Imported ${imported} transaction${imported === 1 ? '' : 's'}${skipped > 0 ? `, ${skipped} duplicate${skipped === 1 ? '' : 's'} skipped` : ''}.`,
+        `Imported ${imported} transaction${imported === 1 ? '' : 's'} from ${files.length} file${
+          files.length === 1 ? '' : 's'
+        }${skipped > 0 ? `, ${skipped} duplicate${skipped === 1 ? '' : 's'} skipped` : ''}.`,
         'success',
       );
     } catch (error) {
@@ -184,6 +220,11 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleFilePick = async () => {
+    const files = await pickWebStatementFiles();
+    await importFiles(files);
   };
 
   const handlePaste = () => {
@@ -201,10 +242,12 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
       notify('Could not find transactions in the pasted text.', 'danger');
       return;
     }
+    const snapshot = state;
     const before = state.transactions.length;
     const next = applyImportedBatch(state, accountId, batch);
     const added = next.transactions.length - before;
     onStateChange(next);
+    setLastImport({ snapshot, count: added });
     setPasted('');
     notify(
       `Added ${added} transaction${added === 1 ? '' : 's'}${added < batch.rows.length ? `, ${batch.rows.length - added} duplicate${batch.rows.length - added === 1 ? '' : 's'} skipped` : ''}.`,
@@ -212,29 +255,105 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
     );
   };
 
+  const undoLastImport = () => {
+    if (!lastImport) return;
+    onStateChange(lastImport.snapshot);
+    notify(`Reverted last import (${lastImport.count} transactions).`, 'info');
+    setLastImport(null);
+  };
+
+  // ── Export helpers ────────────────────────────────────────────────────────
+  const filteredForExport = useMemo(() => {
+    if (exportScope === 'month') {
+      return state.transactions.filter((tx) => tx.date.startsWith(exportMonth));
+    }
+    if (exportScope === 'account') {
+      return state.transactions.filter((tx) => tx.accountId === exportAccount);
+    }
+    return state.transactions;
+  }, [state.transactions, exportScope, exportMonth, exportAccount]);
+
   const exportCsv = () => {
+    const csv = buildTransactionsCsv(state, { transactions: filteredForExport });
+    downloadText(
+      csv,
+      `ledgerline-${exportScope}-${new Date().toISOString().slice(0, 10)}.csv`,
+      'text/csv',
+    );
+    notify(`Exported ${filteredForExport.length} transactions to CSV.`, 'success');
+  };
+
+  const exportQif = () => {
+    const qif =
+      exportScope === 'account' && exportAccount
+        ? buildAccountQif(state, exportAccount)
+        : buildMultiAccountQif(state);
+    if (!qif.trim()) {
+      notify('Nothing to export.', 'danger');
+      return;
+    }
+    downloadText(
+      qif,
+      `ledgerline-${exportScope === 'account' ? 'account' : 'full'}-${new Date()
+        .toISOString()
+        .slice(0, 10)}.qif`,
+      'application/qif',
+    );
+    notify('QIF export downloaded.', 'success');
+  };
+
+  const exportOfx = () => {
+    if (!exportAccount) {
+      notify('Pick an account for OFX export.', 'danger');
+      return;
+    }
+    const ofx = buildAccountOfx(state, exportAccount);
+    if (!ofx.trim()) {
+      notify('Account has no transactions to export.', 'danger');
+      return;
+    }
+    const acct = accounts.find((a) => a.id === exportAccount);
+    downloadText(
+      ofx,
+      `ledgerline-${(acct?.name ?? 'account').replace(/\s+/g, '-').toLowerCase()}-${new Date()
+        .toISOString()
+        .slice(0, 10)}.ofx`,
+      'application/x-ofx',
+    );
+    notify('OFX export downloaded.', 'success');
+  };
+
+  const exportPdf = async () => {
     if (typeof document === 'undefined') return;
-    const csv = buildTransactionsCsv(state);
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `ledgerline-transactions-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-    notify(`Exported ${state.transactions.length} transactions to CSV.`, 'success');
+    try {
+      setBusy(true);
+      const { buildStatementPdf } = await import('../finance/exportPdf');
+      const blob = await buildStatementPdf(state, {
+        month: exportScope === 'month' ? exportMonth : undefined,
+        accountId: exportScope === 'account' ? exportAccount : undefined,
+      });
+      const label =
+        exportScope === 'month'
+          ? exportMonth
+          : exportScope === 'account'
+            ? (accounts.find((a) => a.id === exportAccount)?.name ?? 'account').replace(/\s+/g, '-').toLowerCase()
+            : 'full';
+      downloadBlob(blob, `ledgerline-statement-${label}-${new Date().toISOString().slice(0, 10)}.pdf`);
+      notify(`PDF statement with ${filteredForExport.length} transactions saved.`, 'success');
+    } catch (error) {
+      notify(`PDF export failed: ${getErrorMessage(error)}`, 'danger');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const exportJson = () => {
-    if (typeof document === 'undefined') return;
-    const blob = new Blob([serializeFinanceState(state)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `ledgerline-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
-    notify('Full backup exported.', 'success');
+    downloadText(
+      serializeFinanceState(state),
+      `ledgerline-backup-${new Date().toISOString().slice(0, 10)}.json`,
+      'application/json',
+    );
+    notify('Full JSON backup exported.', 'success');
   };
 
   const importBackup = async () => {
@@ -257,13 +376,55 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
     }
   };
 
+  // ── Drag-and-drop (web only) ─────────────────────────────────────────────
+  const dropHandlers = webOnly
+    ? ({
+        // React Native Web passes these through to the DOM element.
+        onDragEnter: (e: unknown) => {
+          (e as Event).preventDefault();
+          setDropActive(true);
+        },
+        onDragOver: (e: unknown) => {
+          (e as Event).preventDefault();
+          setDropActive(true);
+        },
+        onDragLeave: (e: unknown) => {
+          (e as Event).preventDefault();
+          setDropActive(false);
+        },
+        onDrop: async (e: unknown) => {
+          const ev = e as DragEvent;
+          ev.preventDefault();
+          setDropActive(false);
+          const files = ev.dataTransfer?.files
+            ? Array.from(ev.dataTransfer.files)
+            : [];
+          if (files.length === 0) return;
+          await importFiles(files);
+        },
+      } as unknown as Record<string, unknown>)
+    : {};
+
+  const scopeLabel = (() => {
+    if (exportScope === 'all') return `${state.transactions.length} transactions`;
+    if (exportScope === 'month') return `${filteredForExport.length} in ${exportMonth}`;
+    const acct = accounts.find((a) => a.id === exportAccount);
+    return `${filteredForExport.length} in ${acct?.name ?? 'account'}`;
+  })();
+
   return (
     <View style={{ gap: spacing.lg }}>
-      <View>
-        <Text style={[styles.title, { color: palette.text }]}>Import & export</Text>
-        <Text style={[styles.subtitle, { color: palette.textMuted }]}>
-          Upload statements from any bank (CSV, XLSX, or PDF), paste text, or back up your whole ledger.
-        </Text>
+      <View style={styles.headerRow}>
+        <View style={{ flex: 1, minWidth: 240 }}>
+          <Text style={[styles.title, { color: palette.text }]}>Import & export</Text>
+          <Text style={[styles.subtitle, { color: palette.textMuted }]}>
+            Bring in statements from any bank (CSV, XLSX, or PDF), paste text, or export to CSV,
+            PDF, QIF, or OFX for Quicken, GnuCash, Moneydance, and others.
+          </Text>
+        </View>
+        {lastImport ? (
+          <Button label="Undo last import" variant="ghost" onPress={undoLastImport} />
+        ) : null}
       </View>
 
       {message ? (
@@ -302,7 +463,7 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
         </View>
       ) : null}
 
-      <Card title="Import into account" eyebrow="Step 1 · Destination">
+      <Card title="Import into account" eyebrow="Destination">
         {accounts.length === 0 ? (
           <Text style={{ color: palette.textMuted, fontSize: typography.small }}>
             Add an account first from the Accounts tab.
@@ -316,10 +477,44 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
         )}
       </Card>
 
-      <Card title="CSV import wizard" eyebrow="Preview · map columns · dedupe">
+      {webOnly ? (
+        <View
+          ref={dropZoneRef}
+          {...dropHandlers}
+          style={[
+            styles.dropZone,
+            {
+              backgroundColor: dropActive ? palette.primarySoft : palette.surface,
+              borderColor: dropActive ? palette.primary : palette.border,
+            },
+          ]}
+        >
+          <Text style={[styles.dropTitle, { color: palette.text }]}>
+            Drag & drop statements here
+          </Text>
+          <Text style={[styles.dropSub, { color: palette.textSubtle }]}>
+            CSV · XLSX · PDF — multi-file, headers auto-detected, duplicates skipped by date + payee + amount.
+          </Text>
+          <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm, flexWrap: 'wrap' }}>
+            <Button
+              label={busy ? 'Importing…' : 'Choose file(s)'}
+              onPress={handleFilePick}
+              disabled={busy || !accountId}
+            />
+            <Button
+              label="Export JSON backup"
+              variant="secondary"
+              onPress={exportJson}
+              disabled={busy}
+            />
+          </View>
+        </View>
+      ) : null}
+
+      <Card title="CSV mapping wizard" eyebrow="Preview · map columns · dedupe">
         <Text style={{ color: palette.textMuted, fontSize: typography.small, lineHeight: 19, marginBottom: spacing.md }}>
-          For bank CSVs (Wells Fargo, Chase, etc.): we auto-suggest column roles. Preview the first 10 rows, adjust
-          mappings, then import. Duplicates are skipped using the same date + payee + amount key as quick import.
+          For banks with unusual CSV headers (Wells Fargo, Chase, American Express, etc.): auto-suggest
+          column roles, preview the first 10 rows, adjust, then import. Duplicates are skipped on commit.
         </Text>
         <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap', marginBottom: spacing.md }}>
           <Button
@@ -329,11 +524,11 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
             variant="secondary"
           />
           <Button
-            label="Load pasted CSV below"
+            label="Load pasted CSV"
             onPress={() => {
               const t = pasted.trim();
               if (!t) {
-                notify('Paste CSV into the box in “Paste statement text” first, or use Load CSV file.', 'danger');
+                notify('Paste CSV into the box in "Paste statement text" first, or use Load CSV file.', 'danger');
                 return;
               }
               loadWizardFromText(t, 'pasted-csv-wizard');
@@ -399,7 +594,7 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
 
             <Text style={{ color: wizardReady ? palette.textMuted : palette.warning, fontSize: typography.small }}>
               {wizardReady
-                ? `Ready to import ${wizardParsedCount} parsed row${wizardParsedCount === 1 ? '' : 's'} (duplicates will be skipped on commit).`
+                ? `Ready to import ${wizardParsedCount} parsed row${wizardParsedCount === 1 ? '' : 's'} (duplicates skipped on commit).`
                 : 'Map at least: Date, Description, and either a single Amount column or separate Debit/Credit columns.'}
             </Text>
             <Button
@@ -412,55 +607,108 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
         ) : null}
       </Card>
 
-      <View style={styles.grid}>
-        <Card title="Upload files" eyebrow="CSV · XLSX · PDF" style={styles.flex1}>
-          <Text style={{ color: palette.textMuted, fontSize: typography.small, lineHeight: 19 }}>
-            We detect the column headers automatically for most banks. Duplicates are skipped by
-            date, payee, and amount.
-          </Text>
-          <Button
-            label={busy ? 'Importing…' : 'Choose file(s)'}
-            onPress={handleFilePick}
-            disabled={busy || !webOnly || !accountId}
-            fullWidth
-          />
-          {!webOnly ? (
-            <Text style={{ color: palette.textSubtle, fontSize: typography.micro }}>
-              File upload is available on the web. Paste text below on mobile.
-            </Text>
+      <Card title="Paste statement text" eyebrow="Works on any device">
+        <Input
+          placeholder={'Date, Payee, Amount\n04/01/2026, Spotify, -11.99\n04/02/2026, Payroll, 1960.00'}
+          value={pasted}
+          onChangeText={setPasted}
+          multiline
+          numberOfLines={8}
+          style={{ minHeight: 140, textAlignVertical: 'top' }}
+        />
+        <Button
+          label="Parse pasted text"
+          variant="secondary"
+          onPress={handlePaste}
+          disabled={!accountId}
+        />
+      </Card>
+
+      <Card
+        title="Export"
+        eyebrow="CSV · PDF · QIF · OFX · JSON backup"
+        action={<Badge label={scopeLabel} tone="primary" />}
+      >
+        <View style={{ gap: spacing.md }}>
+          <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+            {(['all', 'month', 'account'] as const).map((scope) => {
+              const active = exportScope === scope;
+              return (
+                <Pressable
+                  key={scope}
+                  onPress={() => setExportScope(scope)}
+                  style={[
+                    styles.scopePill,
+                    {
+                      backgroundColor: active ? palette.primary : palette.surfaceSunken,
+                      borderColor: active ? palette.primary : palette.borderSoft,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      color: active ? palette.primaryText : palette.textMuted,
+                      fontWeight: '700',
+                      fontSize: typography.small,
+                    }}
+                  >
+                    {scope === 'all' ? 'Everything' : scope === 'month' ? 'Single month' : 'Single account'}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {exportScope === 'month' ? (
+            <Input
+              label="Month (YYYY-MM)"
+              value={exportMonth}
+              onChangeText={setExportMonth}
+              placeholder="2026-04"
+            />
           ) : null}
-        </Card>
+          {exportScope === 'account' ? (
+            <Select
+              label="Account"
+              value={exportAccount}
+              onChange={setExportAccount}
+              options={accounts.map((a) => ({ value: a.id, label: a.name }))}
+            />
+          ) : null}
 
-        <Card title="Paste statement text" eyebrow="Works on any device" style={styles.flex1}>
-          <Input
-            placeholder={
-              'Date, Payee, Amount\n04/01/2026, Spotify, -11.99\n04/02/2026, Payroll, 1960.00'
-            }
-            value={pasted}
-            onChangeText={setPasted}
-            multiline
-            numberOfLines={8}
-            style={{ minHeight: 160, textAlignVertical: 'top' }}
-          />
-          <Button
-            label="Parse pasted text"
-            variant="secondary"
-            onPress={handlePaste}
-            disabled={!accountId}
-            fullWidth
-          />
-        </Card>
-      </View>
+          <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
+            <Button
+              label={`CSV · ${filteredForExport.length}`}
+              variant="secondary"
+              onPress={exportCsv}
+              disabled={filteredForExport.length === 0}
+            />
+            <Button
+              label={busy ? 'Building PDF…' : 'PDF statement'}
+              onPress={exportPdf}
+              disabled={busy || filteredForExport.length === 0}
+            />
+            <Button
+              label="QIF (Quicken)"
+              variant="secondary"
+              onPress={exportQif}
+            />
+            <Button
+              label="OFX (bank format)"
+              variant="secondary"
+              onPress={exportOfx}
+              disabled={exportScope !== 'account' && !exportAccount}
+            />
+            <Button label="JSON backup" variant="ghost" onPress={exportJson} />
+            <Button label="Restore JSON" variant="ghost" onPress={importBackup} disabled={busy} />
+          </View>
 
-      <Card title="Backups" eyebrow="Full state">
-        <Text style={{ color: palette.textMuted, fontSize: typography.small, lineHeight: 19 }}>
-          Exports capture accounts, transactions, budgets, goals, and import history. Keep one handy
-          before major imports — restoring replaces your ledger.
-        </Text>
-        <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
-          <Button label="Export CSV (transactions)" variant="secondary" onPress={exportCsv} />
-          <Button label="Export JSON backup" onPress={exportJson} />
-          <Button label="Restore from JSON" variant="ghost" onPress={importBackup} disabled={busy} />
+          <Text style={{ color: palette.textSubtle, fontSize: typography.micro, lineHeight: 16 }}>
+            PDF statements are print-ready with a cover summary and color-coded totals. QIF works with
+            Quicken, GnuCash, Moneydance, and Banktivity. OFX targets bank-import workflows and is
+            emitted per account. Keep a JSON backup before bulk changes — restoring replaces your
+            ledger.
+          </Text>
         </View>
       </Card>
 
@@ -491,15 +739,42 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
 }
 
 const styles = StyleSheet.create({
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    flexWrap: 'wrap',
+  },
   title: { fontSize: typography.display, fontWeight: '800' },
-  subtitle: { fontSize: typography.small, marginTop: 4 },
+  subtitle: { fontSize: typography.small, marginTop: 4, lineHeight: 19 },
   banner: {
     borderRadius: radius.md,
     borderWidth: 1,
     padding: spacing.md,
   },
-  grid: { flexDirection: 'row', gap: spacing.lg, flexWrap: 'wrap' },
-  flex1: { flex: 1, minWidth: 320 },
+  dropZone: {
+    borderRadius: radius.lg,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    padding: spacing.xl,
+    alignItems: 'center',
+    gap: 6,
+  },
+  dropTitle: {
+    fontSize: typography.title,
+    fontWeight: '800',
+  },
+  dropSub: {
+    fontSize: typography.small,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  scopePill: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+  },
   historyRow: {
     flexDirection: 'row',
     alignItems: 'center',

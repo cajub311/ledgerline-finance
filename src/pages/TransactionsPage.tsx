@@ -7,19 +7,23 @@ import { Card } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
+import { buildTransactionsCsv } from '../finance/export';
 import {
   addManualTransaction,
   deleteTransaction,
+  deleteTransactions,
   getAccountsWithBalances,
   getCategoryIcon,
   getCategoryOptions,
+  setTransactionsCategory,
+  setTransactionsReviewed,
   toggleTransactionReview,
   updateTransaction,
 } from '../finance/ledger';
 import type { FinanceState, FinanceTransaction } from '../finance/types';
 import { useTheme } from '../theme/ThemeContext';
 import { radius, spacing, typography } from '../theme/tokens';
-import { formatCurrency, formatIsoDate } from '../utils/format';
+import { downloadText, formatCurrency, formatIsoDate } from '../utils/format';
 
 interface TransactionsPageProps {
   state: FinanceState;
@@ -47,6 +51,8 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
   const [addAccount, setAddAccount] = useState<string>(accounts[0]?.id ?? '');
 
   const [editing, setEditing] = useState<FinanceTransaction | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set<string>());
+  const [bulkCategory, setBulkCategory] = useState<string>('Other');
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -76,6 +82,66 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
     return { income, expense, net: income - expense };
   }, [filtered]);
 
+  // Drop any selections that are no longer visible/exist.
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const visible = new Set(filtered.map((tx) => tx.id));
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (visible.has(id)) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [filtered]);
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const selectAllVisible = () => {
+    setSelectedIds(new Set(filtered.slice(0, 300).map((tx) => tx.id)));
+  };
+
+  const bulkMarkReviewed = (reviewed: boolean) => {
+    if (selectedIds.size === 0) return;
+    onStateChange(setTransactionsReviewed(state, Array.from(selectedIds), reviewed));
+    clearSelection();
+  };
+
+  const bulkDelete = () => {
+    if (selectedIds.size === 0) return;
+    onStateChange(deleteTransactions(state, Array.from(selectedIds)));
+    clearSelection();
+  };
+
+  const bulkRecategorize = () => {
+    if (selectedIds.size === 0) return;
+    onStateChange(setTransactionsCategory(state, Array.from(selectedIds), bulkCategory));
+    clearSelection();
+  };
+
+  const exportFilteredCsv = () => {
+    const csv = buildTransactionsCsv(state, { transactions: filtered });
+    downloadText(
+      csv,
+      `ledgerline-filtered-${new Date().toISOString().slice(0, 10)}.csv`,
+      'text/csv',
+    );
+  };
+
   const submitAdd = () => {
     const next = addManualTransaction(state, {
       accountId: addAccount || accounts[0]?.id || '',
@@ -103,8 +169,49 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
             {filtered.length} shown · {formatCurrency(totals.income)} in · {formatCurrency(totals.expense)} out · net {formatCurrency(totals.net)}
           </Text>
         </View>
+        <Button
+          label="Export filtered CSV"
+          variant="ghost"
+          onPress={exportFilteredCsv}
+          disabled={filtered.length === 0}
+        />
         <Button label="Add transaction" onPress={() => setShowAdd(true)} />
       </View>
+
+      {selectedIds.size > 0 ? (
+        <View
+          style={[
+            styles.bulkBar,
+            {
+              backgroundColor: palette.primarySoft,
+              borderColor: palette.primary,
+            },
+          ]}
+        >
+          <Text style={{ color: palette.primary, fontWeight: '800' }}>
+            {selectedIds.size} selected
+          </Text>
+          <View style={{ flex: 1 }} />
+          <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Button label="Review" size="sm" variant="secondary" onPress={() => bulkMarkReviewed(true)} />
+            <Button label="Unreview" size="sm" variant="ghost" onPress={() => bulkMarkReviewed(false)} />
+            <View style={{ minWidth: 150 }}>
+              <Select
+                value={bulkCategory}
+                onChange={setBulkCategory}
+                options={categoryOptions.map((c) => ({
+                  value: c,
+                  label: c,
+                  icon: getCategoryIcon(c),
+                }))}
+              />
+            </View>
+            <Button label="Apply" size="sm" variant="primary" onPress={bulkRecategorize} />
+            <Button label="Delete" size="sm" variant="danger" onPress={bulkDelete} />
+            <Button label="Clear" size="sm" variant="ghost" onPress={clearSelection} />
+          </View>
+        </View>
+      ) : null}
 
       <Card padding={spacing.md}>
         <View style={{ gap: spacing.md }}>
@@ -154,20 +261,86 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
           </View>
         ) : (
           <View>
+            <View style={[styles.bulkHeader, { borderBottomColor: palette.borderSoft }]}>
+              <Pressable
+                onPress={
+                  selectedIds.size > 0 ? clearSelection : selectAllVisible
+                }
+                style={styles.checkboxWrap}
+              >
+                <View
+                  style={[
+                    styles.checkbox,
+                    {
+                      borderColor:
+                        selectedIds.size > 0 ? palette.primary : palette.border,
+                      backgroundColor:
+                        selectedIds.size > 0 ? palette.primary : 'transparent',
+                    },
+                  ]}
+                >
+                  {selectedIds.size > 0 ? (
+                    <Text style={{ color: palette.primaryText, fontWeight: '800' }}>
+                      {selectedIds.size === filtered.length ? '✓' : '—'}
+                    </Text>
+                  ) : null}
+                </View>
+              </Pressable>
+              <Text style={[styles.bulkHeaderText, { color: palette.textSubtle }]}>
+                {selectedIds.size === 0
+                  ? 'Select to bulk-review or recategorize'
+                  : `${selectedIds.size} of ${filtered.length} selected`}
+              </Text>
+            </View>
             {filtered.slice(0, 300).map((tx) => {
               const account = accounts.find((a) => a.id === tx.accountId);
+              const selected = selectedIds.has(tx.id);
               return (
                 <Pressable
                   key={tx.id}
-                  onPress={() => setEditing(tx)}
+                  onPress={() => {
+                    if (selectedIds.size > 0) {
+                      toggleSelect(tx.id);
+                    } else {
+                      setEditing(tx);
+                    }
+                  }}
+                  onLongPress={() => toggleSelect(tx.id)}
                   style={({ hovered }) => [
                     styles.row,
                     {
                       borderBottomColor: palette.borderSoft,
-                      backgroundColor: hovered ? palette.surfaceSunken : 'transparent',
+                      backgroundColor: selected
+                        ? palette.primarySoft
+                        : hovered
+                          ? palette.surfaceSunken
+                          : 'transparent',
                     },
                   ]}
                 >
+                  <Pressable
+                    onPress={() => toggleSelect(tx.id)}
+                    style={styles.checkboxWrap}
+                    hitSlop={6}
+                  >
+                    <View
+                      style={[
+                        styles.checkbox,
+                        {
+                          borderColor: selected ? palette.primary : palette.border,
+                          backgroundColor: selected ? palette.primary : 'transparent',
+                        },
+                      ]}
+                    >
+                      {selected ? (
+                        <Text
+                          style={{ color: palette.primaryText, fontWeight: '800', fontSize: 12 }}
+                        >
+                          ✓
+                        </Text>
+                      ) : null}
+                    </View>
+                  </Pressable>
                   <View style={styles.rowIcon}>
                     <Text style={{ fontSize: 18 }}>{getCategoryIcon(tx.category)}</Text>
                   </View>
@@ -368,6 +541,44 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: typography.display, fontWeight: '800' },
   subtitle: { fontSize: typography.small, marginTop: 4 },
+  bulkBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    flexWrap: 'wrap',
+  },
+  bulkHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  bulkHeaderText: {
+    fontSize: typography.micro,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  checkboxWrap: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkbox: {
+    width: 18,
+    height: 18,
+    borderRadius: 5,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
