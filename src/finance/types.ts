@@ -213,3 +213,14 @@ export interface NetWorthMonthPoint {
   assets: number;
   liabilities: number;
 }
+
+/** Projected upcoming charge or income from detected recurring patterns */
+export interface ProjectedRecurringItem {
+  date: string;
+  payee: string;
+  amount: number;
+  frequency: 'weekly' | 'monthly' | 'annual';
+  kind: 'charge' | 'income';
+  /** 0–0.95 confidence from pattern strength */
+  confidence: number;
+}
