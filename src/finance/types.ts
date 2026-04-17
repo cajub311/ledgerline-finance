@@ -40,6 +40,21 @@ export interface Budget {
   category: string;
   monthlyLimit: number;
   createdAt: string;
+  /** When true (default), unused dollars roll forward; when false, surplus resets but overspending still rolls as debt. */
+  rollover?: boolean;
+  /** Optional starting envelope balance before the creation month (e.g. migration). */
+  carry?: number;
+}
+
+/** Per-budget envelope view for a calendar month (zero-based / envelope budgeting). */
+export interface BudgetEnvelope {
+  budgetId: string;
+  category: string;
+  assigned: number;
+  carriedIn: number;
+  spent: number;
+  available: number;
+  status: 'ok' | 'warning' | 'over';
 }
 
 export interface FinancialGoal {
@@ -51,9 +66,13 @@ export interface FinancialGoal {
   createdAt: string;
 }
 
+export type BudgetViewMode = 'flow' | 'envelope';
+
 export interface FinancePreferences {
   /** Balance threshold for cash-flow forecast warnings; 0 disables highlights */
   forecastLowBalanceThreshold: number;
+  /** Flow = limit vs spent this month only; Envelope = rollover and ready-to-assign. */
+  budgetViewMode: BudgetViewMode;
 }
 
 export interface FinanceState {
