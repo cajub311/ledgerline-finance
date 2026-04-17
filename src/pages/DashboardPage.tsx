@@ -20,8 +20,9 @@ import {
   getSafeToSpend,
   getSavingsRate,
   getTopMerchants,
+  projectRecurring,
 } from '../finance/ledger';
-import type { FinanceState } from '../finance/types';
+import type { FinanceState, ProjectedRecurringItem } from '../finance/types';
 import { useTheme } from '../theme/ThemeContext';
 import { radius, spacing, typography } from '../theme/tokens';
 import { formatCurrency } from '../utils/format';
@@ -53,6 +54,8 @@ export function DashboardPage({ state }: DashboardPageProps) {
   const budgetStatuses = useMemo(() => getBudgetStatus(state, year, month), [state, year, month]);
   const subs = useMemo(() => detectSubscriptions(state.transactions), [state.transactions]);
   const insights = useMemo(() => generateInsights(state), [state]);
+  const upcomingHorizonDays = 30;
+  const upcoming = useMemo(() => projectRecurring(state, upcomingHorizonDays), [state]);
 
   const budgetedByCategory = useMemo(() => {
     const map: Record<string, number> = {};
@@ -67,6 +70,37 @@ export function DashboardPage({ state }: DashboardPageProps) {
   const subsMonthly = subs.filter((s) => s.frequency === 'monthly').reduce((s, c) => s + c.amount, 0);
   const safeToSpend = useMemo(() => getSafeToSpend(state), [state]);
   const health = useMemo(() => getFinancialHealthScore(state), [state]);
+
+  const upcomingByWeek = useMemo(() => {
+    const mondayKey = (iso: string) => {
+      const d = new Date(iso + 'T12:00:00');
+      if (!Number.isFinite(d.getTime())) return iso;
+      const dow = d.getDay();
+      const offset = dow === 0 ? -6 : 1 - dow;
+      const mon = new Date(d.getFullYear(), d.getMonth(), d.getDate() + offset);
+      return `${mon.getFullYear()}-${`${mon.getMonth() + 1}`.padStart(2, '0')}-${`${mon.getDate()}`.padStart(2, '0')}`;
+    };
+    const map = new Map<string, { items: ProjectedRecurringItem[]; out: number; inn: number; sort: string }>();
+    for (const row of upcoming) {
+      const key = mondayKey(row.date);
+      if (!map.has(key)) {
+        map.set(key, { items: [], out: 0, inn: 0, sort: key });
+      }
+      const g = map.get(key)!;
+      g.items.push(row);
+      if (row.kind === 'charge') g.out += Math.abs(row.amount);
+      else g.inn += row.amount;
+    }
+    for (const g of map.values()) {
+      g.items.sort((a, b) => {
+        const c = a.date.localeCompare(b.date);
+        if (c !== 0) return c;
+        if (a.kind !== b.kind) return a.kind === 'charge' ? -1 : 1;
+        return a.payee.localeCompare(b.payee);
+      });
+    }
+    return [...map.values()].sort((a, b) => a.sort.localeCompare(b.sort));
+  }, [upcoming]);
 
   return (
     <View style={{ gap: spacing.lg }}>
@@ -128,6 +162,79 @@ export function DashboardPage({ state }: DashboardPageProps) {
           footer={savingsRate >= 20 ? 'Healthy' : savingsRate > 0 ? 'Keep building' : 'No savings this month'}
         />
       </View>
+
+      <Card
+        title="Upcoming in the next 30 days"
+        eyebrow="From detected recurring charges & income"
+        action={
+          upcoming.length ? (
+            <Badge label={`${upcoming.length} projected`} tone="primary" />
+          ) : null
+        }
+      >
+        {upcoming.length === 0 ? (
+          <Text style={{ color: palette.textSubtle, fontSize: typography.small, lineHeight: 19 }}>
+            Add a few more similar-dated paychecks or subscription charges to see projected dates here.
+          </Text>
+        ) : (
+          <View style={{ gap: spacing.lg }}>
+            {upcomingByWeek.map((week) => {
+              const start = new Date(week.sort + 'T12:00:00');
+              const end = new Date(start);
+              end.setDate(start.getDate() + 6);
+              const rangeLabel = `${start.toLocaleString('default', { month: 'short', day: 'numeric' })} – ${end.toLocaleString('default', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+              return (
+                <View key={week.sort} style={{ gap: spacing.sm }}>
+                  <Text style={{ color: palette.text, fontWeight: '800', fontSize: typography.small }}>
+                    {rangeLabel}
+                  </Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md }}>
+                    <Text style={{ color: palette.danger, fontSize: typography.small, fontWeight: '700' }}>
+                      Out {formatCurrency(week.out)}
+                    </Text>
+                    <Text style={{ color: palette.success, fontSize: typography.small, fontWeight: '700' }}>
+                      In {formatCurrency(week.inn)}
+                    </Text>
+                  </View>
+                  <View style={{ gap: spacing.xs }}>
+                    {week.items.map((row, idx) => (
+                      <View
+                        key={`${row.date}-${row.payee}-${row.kind}-${idx}`}
+                        style={[
+                          styles.upcomingRow,
+                          { backgroundColor: palette.surfaceSunken, borderColor: palette.borderSoft },
+                        ]}
+                      >
+                        <Text style={{ color: palette.textSubtle, fontSize: typography.micro, width: 88 }}>
+                          {row.date}
+                        </Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: palette.text, fontWeight: '600', fontSize: typography.small }}>
+                            {row.payee}
+                          </Text>
+                          <Text style={{ color: palette.textMuted, fontSize: typography.micro }}>
+                            {row.frequency} · {Math.round(row.confidence * 100)}% confidence
+                          </Text>
+                        </View>
+                        <Text
+                          style={{
+                            fontWeight: '800',
+                            fontSize: typography.small,
+                            color: row.kind === 'charge' ? palette.text : palette.success,
+                          }}
+                        >
+                          {row.amount < 0 ? '' : '+'}
+                          {formatCurrency(row.amount)}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </Card>
 
       <View style={styles.twoCol}>
         <Card title="Income vs spend" eyebrow="Last 6 months" style={styles.flex2}>
@@ -375,5 +482,14 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 1,
     padding: spacing.md,
+  },
+  upcomingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
   },
 });
