@@ -8,14 +8,19 @@ import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
 import {
+  getBudgetEnvelopes,
   getBudgetStatus,
   getCategoryBreakdown,
   getCategoryIcon,
   getCategoryOptions,
+  getReadyToAssign,
   removeBudget,
   setBudget,
+  setBudgetViewMode,
+  setBudgetRollover,
+  updateBudgetMonthlyLimit,
 } from '../finance/ledger';
-import type { FinanceState } from '../finance/types';
+import type { BudgetEnvelope, Budget, FinanceState } from '../finance/types';
 import { useTheme } from '../theme/ThemeContext';
 import { radius, spacing, typography } from '../theme/tokens';
 import { formatCurrency } from '../utils/format';
@@ -31,7 +36,13 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
 
+  const envelopeMode = state.preferences.budgetViewMode === 'envelope';
   const statuses = useMemo(() => getBudgetStatus(state, year, month), [state, year, month]);
+  const envelopeByBudgetId = useMemo(() => {
+    const list = getBudgetEnvelopes(state, year, month);
+    return new Map(list.map((e) => [e.budgetId, e]));
+  }, [state.transactions, state.budgets, year, month]);
+  const readyToAssign = useMemo(() => getReadyToAssign(state, year, month), [state.transactions, state.budgets, year, month]);
   const breakdown = useMemo(
     () => getCategoryBreakdown(state.transactions, year, month),
     [state.transactions, year, month],
@@ -42,9 +53,19 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
   const [editCategory, setEditCategory] = useState<string | null>(null);
   const [category, setCategory] = useState('Groceries');
   const [limit, setLimit] = useState('');
+  const [inlineLimits, setInlineLimits] = useState<Record<string, string>>({});
 
   const totalLimit = statuses.reduce((s, b) => s + b.limit, 0);
   const totalSpent = statuses.reduce((s, b) => s + b.spent, 0);
+
+  const rows: Array<{ env: BudgetEnvelope; budget: Budget }> | null = envelopeMode
+    ? state.budgets
+        .map((budget) => {
+          const env = envelopeByBudgetId.get(budget.id);
+          return env ? { env, budget } : null;
+        })
+        .filter((r): r is { env: BudgetEnvelope; budget: Budget } => r !== null)
+    : null;
 
   const unbudgeted = breakdown
     .filter((b) => !statuses.some((s) => s.category === b.category))
@@ -84,11 +105,55 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
         <View style={{ flex: 1, minWidth: 240 }}>
           <Text style={[styles.title, { color: palette.text }]}>Budgets</Text>
           <Text style={[styles.subtitle, { color: palette.textMuted }]}>
-            {now.toLocaleString('default', { month: 'long', year: 'numeric' })} · {formatCurrency(totalSpent)} spent of {formatCurrency(totalLimit)} budgeted
+            {now.toLocaleString('default', { month: 'long', year: 'numeric' })} ·{' '}
+            {envelopeMode
+              ? `${formatCurrency(totalSpent)} spent · ${formatCurrency(totalLimit)} assigned`
+              : `${formatCurrency(totalSpent)} spent of ${formatCurrency(totalLimit)} budgeted`}
           </Text>
         </View>
         <Button label="New budget" onPress={openAdd} />
       </View>
+
+      <View style={styles.modeRow}>
+        <Text style={[styles.modeLabel, { color: palette.textMuted }]}>View</Text>
+        <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
+          <Pressable
+            onPress={() => onStateChange(setBudgetViewMode(state, 'flow'))}
+            style={({ hovered }) => [
+              styles.modePill,
+              {
+                backgroundColor: !envelopeMode ? palette.primarySoft : palette.surface,
+                borderColor: !envelopeMode ? palette.primary : hovered ? palette.primary : palette.borderSoft,
+              },
+            ]}
+          >
+            <Text style={{ color: palette.text, fontWeight: '700', fontSize: typography.small }}>Flow</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => onStateChange(setBudgetViewMode(state, 'envelope'))}
+            style={({ hovered }) => [
+              styles.modePill,
+              {
+                backgroundColor: envelopeMode ? palette.primarySoft : palette.surface,
+                borderColor: envelopeMode ? palette.primary : hovered ? palette.primary : palette.borderSoft,
+              },
+            ]}
+          >
+            <Text style={{ color: palette.text, fontWeight: '700', fontSize: typography.small }}>Envelope</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      {envelopeMode ? (
+        <Card title="Ready to assign" eyebrow="This month’s income minus assigned to categories">
+          <Text style={[styles.rtaAmount, { color: readyToAssign < 0 ? palette.danger : palette.primary }]}>
+            {formatCurrency(readyToAssign)}
+          </Text>
+          <Text style={{ color: palette.textSubtle, fontSize: typography.small, marginTop: 6, lineHeight: 19 }}>
+            Assign dollars to envelopes until this reaches zero. Income uses all positive inflows this month.
+          </Text>
+        </Card>
+      ) : null}
 
       {statuses.length === 0 ? (
         <Card
@@ -116,6 +181,124 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
             ))}
           </View>
         </Card>
+      ) : envelopeMode && rows ? (
+        <View style={{ gap: spacing.md }}>
+          {rows.map(({ env, budget }) => {
+            if (!budget) return null;
+            const pct =
+              env.assigned + env.carriedIn > 0
+                ? Math.min(1, env.spent / (env.assigned + env.carriedIn))
+                : budget.monthlyLimit > 0
+                  ? Math.min(1, env.spent / budget.monthlyLimit)
+                  : 0;
+            const color =
+              env.status === 'over'
+                ? palette.danger
+                : env.status === 'warning'
+                  ? palette.warning
+                  : palette.success;
+            const limitKey = budget.id;
+            const limitDraft =
+              inlineLimits[limitKey] ?? String(budget.monthlyLimit === 0 ? '' : budget.monthlyLimit);
+
+            return (
+              <View
+                key={budget.id}
+                style={[
+                  styles.budget,
+                  {
+                    backgroundColor: palette.surface,
+                    borderColor: palette.borderSoft,
+                  },
+                ]}
+              >
+                <View style={styles.budgetTop}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md, flex: 1 }}>
+                    <View
+                      style={[
+                        styles.iconChip,
+                        { backgroundColor: palette.surfaceSunken, borderColor: palette.borderSoft },
+                      ]}
+                    >
+                      <Text style={{ fontSize: 20 }}>{getCategoryIcon(env.category)}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Pressable onPress={() => openEdit(env.category, budget.monthlyLimit)}>
+                        <Text style={[styles.cat, { color: palette.text }]}>{env.category}</Text>
+                      </Pressable>
+                      <Text style={[styles.catMeta, { color: palette.textMuted }]}>
+                        Rolled in {formatCurrency(env.carriedIn)} · spent {formatCurrency(env.spent)}
+                      </Text>
+                    </View>
+                  </View>
+                  <Badge
+                    label={
+                      env.status === 'over'
+                        ? 'Over envelope'
+                        : env.status === 'warning'
+                          ? 'Getting close'
+                          : 'On track'
+                    }
+                    tone={
+                      env.status === 'over' ? 'danger' : env.status === 'warning' ? 'warning' : 'success'
+                    }
+                  />
+                </View>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, alignItems: 'flex-end' }}>
+                  <View style={{ flex: 1, minWidth: 140 }}>
+                    <Text style={[styles.inlineLabel, { color: palette.textMuted }]}>Assigned (monthly)</Text>
+                    <Input
+                      value={limitDraft}
+                      onChangeText={(t) => setInlineLimits((prev) => ({ ...prev, [limitKey]: t }))}
+                      onBlur={() => {
+                        const n = Number.parseFloat(limitDraft);
+                        if (Number.isFinite(n) && n >= 0) {
+                          onStateChange(updateBudgetMonthlyLimit(state, budget.id, n));
+                          setInlineLimits((prev) => {
+                            const next = { ...prev };
+                            delete next[limitKey];
+                            return next;
+                          });
+                        }
+                      }}
+                      placeholder="0"
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                    <Text style={{ color: palette.textMuted, fontSize: typography.small }}>Rollover</Text>
+                    <Button
+                      label={budget.rollover !== false ? 'On' : 'Off'}
+                      size="sm"
+                      variant="secondary"
+                      onPress={() =>
+                        onStateChange(setBudgetRollover(state, budget.id, !(budget.rollover !== false)))
+                      }
+                    />
+                  </View>
+                </View>
+                <View style={[styles.track, { backgroundColor: palette.surfaceSunken }]}>
+                  <View style={[styles.fill, { width: `${pct * 100}%`, backgroundColor: color }]} />
+                </View>
+                <Text
+                  style={[
+                    styles.remaining,
+                    { color: env.available < 0 ? palette.danger : palette.textSubtle },
+                  ]}
+                >
+                  {env.available >= 0
+                    ? `${formatCurrency(env.available)} available`
+                    : `${formatCurrency(Math.abs(env.available))} over available`}
+                </Text>
+                <Pressable onPress={() => openEdit(env.category, budget.monthlyLimit)}>
+                  <Text style={{ color: palette.primary, fontSize: typography.micro, fontWeight: '700' }}>
+                    Edit in modal · remove
+                  </Text>
+                </Pressable>
+              </View>
+            );
+          })}
+        </View>
       ) : (
         <View style={{ gap: spacing.md }}>
           {statuses.map((status) => {
@@ -260,6 +443,16 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap' },
   title: { fontSize: typography.display, fontWeight: '800' },
   subtitle: { fontSize: typography.small, marginTop: 4 },
+  modeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap' },
+  modeLabel: { fontSize: typography.small, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6 },
+  modePill: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+  },
+  rtaAmount: { fontSize: 28, fontWeight: '800', letterSpacing: -0.3 },
+  inlineLabel: { fontSize: typography.micro, fontWeight: '700', marginBottom: 4, textTransform: 'uppercase' },
   budget: {
     borderRadius: radius.lg,
     borderWidth: 1,
