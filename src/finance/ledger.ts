@@ -845,8 +845,10 @@ export function getFinancialHealthScore(state: FinanceState): FinancialHealthSco
   const month = now.getMonth() + 1;
   let score = 100;
 
-  const budgetStatuses = getBudgetStatus(state, year, month);
-  const over = budgetStatuses.filter((b) => b.status === 'over').length;
+  const over =
+    state.preferences.budgetsViewMode === 'envelope'
+      ? countOverBudgetEnvelopes(state, year, month)
+      : getBudgetStatus(state, year, month).filter((b) => b.status === 'over').length;
   score -= Math.min(36, over * 12);
 
   const uncategorized = state.transactions.filter(
