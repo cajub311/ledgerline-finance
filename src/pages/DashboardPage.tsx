@@ -51,14 +51,23 @@ export function DashboardPage({ state }: DashboardPageProps) {
   );
   const latest = useMemo(() => getLatestTransactions(state, 6), [state]);
   const accounts = useMemo(() => getAccountsWithBalances(state), [state]);
-  const budgetStatuses = useMemo(() => getBudgetStatus(state, year, month), [state, year, month]);
   const envelopeMode = state.preferences.envelopeBudgeting === true;
+  const dashboardEnvelopes = useMemo(() => {
+    if (!envelopeMode) return null;
+    return getBudgetEnvelopes(state, year, month);
+  }, [envelopeMode, state.budgets, state.transactions, year, month]);
+
+  const budgetStatuses = useMemo(
+    () => getBudgetStatus(state, year, month, dashboardEnvelopes),
+    [state, year, month, dashboardEnvelopes],
+  );
+
   const overBudgetCount = useMemo(() => {
     if (!envelopeMode) {
       return budgetStatuses.filter((b) => b.status === 'over').length;
     }
-    return getBudgetEnvelopes(state, year, month).filter((e) => e.available < 0).length;
-  }, [envelopeMode, state, year, month, budgetStatuses]);
+    return (dashboardEnvelopes ?? []).filter((e) => e.available < 0).length;
+  }, [envelopeMode, budgetStatuses, dashboardEnvelopes]);
   const subs = useMemo(() => detectSubscriptions(state.transactions), [state.transactions]);
   const insights = useMemo(() => generateInsights(state), [state]);
 

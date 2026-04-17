@@ -37,12 +37,20 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
 
   const envelopeMode = state.preferences.envelopeBudgeting === true;
 
-  const envelopeByBudgetId = useMemo(() => {
-    const list = getBudgetEnvelopes(state, year, month);
-    return Object.fromEntries(list.map((e) => [e.budgetId, e]));
-  }, [state.budgets, state.transactions, year, month]);
+  const envelopes = useMemo(() => {
+    if (!envelopeMode) return null;
+    return getBudgetEnvelopes(state, year, month);
+  }, [envelopeMode, state.budgets, state.transactions, year, month]);
 
-  const statuses = useMemo(() => getBudgetStatus(state, year, month), [state, year, month]);
+  const envelopeByBudgetId = useMemo(() => {
+    if (!envelopes) return {};
+    return Object.fromEntries(envelopes.map((e) => [e.budgetId, e]));
+  }, [envelopes]);
+
+  const statuses = useMemo(
+    () => getBudgetStatus(state, year, month, envelopes),
+    [state, year, month, envelopes],
+  );
   const breakdown = useMemo(
     () => getCategoryBreakdown(state.transactions, year, month),
     [state.transactions, year, month],

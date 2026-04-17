@@ -855,6 +855,8 @@ export function getBudgetStatus(
   state: FinanceState,
   year: number,
   month: number,
+  /** When envelope mode is on, pass precomputed envelopes to avoid duplicate work. */
+  precalcEnvelopes?: BudgetEnvelope[] | null,
 ): BudgetStatus[] {
   const breakdown = getCategoryBreakdown(state.transactions, year, month);
   const spentByCategory: Record<string, number> = {};
@@ -864,7 +866,7 @@ export function getBudgetStatus(
   }
 
   const useEnvelope = state.preferences.envelopeBudgeting === true;
-  const envelopes = useEnvelope ? getBudgetEnvelopes(state, year, month) : null;
+  const envelopes = useEnvelope ? (precalcEnvelopes ?? getBudgetEnvelopes(state, year, month)) : null;
   const envById = envelopes ? Object.fromEntries(envelopes.map((e) => [e.budgetId, e])) : null;
 
   return state.budgets.map((budget) => {
