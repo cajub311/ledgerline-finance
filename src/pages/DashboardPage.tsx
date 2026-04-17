@@ -10,6 +10,7 @@ import {
   detectSubscriptions,
   generateInsights,
   getAccountsWithBalances,
+  getBudgetEnvelopes,
   getBudgetStatus,
   getCategoryBreakdown,
   getCategoryIcon,
@@ -51,6 +52,11 @@ export function DashboardPage({ state }: DashboardPageProps) {
   const latest = useMemo(() => getLatestTransactions(state, 6), [state]);
   const accounts = useMemo(() => getAccountsWithBalances(state), [state]);
   const budgetStatuses = useMemo(() => getBudgetStatus(state, year, month), [state, year, month]);
+  const envelopeMode = state.preferences.budgetViewMode === 'envelope';
+  const budgetEnvelopes = useMemo(
+    () => (envelopeMode ? getBudgetEnvelopes(state, year, month) : []),
+    [envelopeMode, state.budgets, state.transactions, year, month],
+  );
   const subs = useMemo(() => detectSubscriptions(state.transactions), [state.transactions]);
   const insights = useMemo(() => generateInsights(state), [state]);
 
@@ -63,7 +69,9 @@ export function DashboardPage({ state }: DashboardPageProps) {
   const monthLabel = now.toLocaleString('default', { month: 'long', year: 'numeric' });
   const monthName = now.toLocaleString('default', { month: 'long' });
   const net = summary.monthIncome - summary.monthSpend;
-  const overBudget = budgetStatuses.filter((b) => b.status === 'over').length;
+  const overBudget = envelopeMode
+    ? budgetEnvelopes.filter((b) => b.available < 0).length
+    : budgetStatuses.filter((b) => b.status === 'over').length;
   const subsMonthly = subs.filter((s) => s.frequency === 'monthly').reduce((s, c) => s + c.amount, 0);
   const safeToSpend = useMemo(() => getSafeToSpend(state), [state]);
   const health = useMemo(() => getFinancialHealthScore(state), [state]);

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Badge } from '../components/ui/Badge';
@@ -8,12 +8,16 @@ import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
 import {
+  getBudgetEnvelopes,
   getBudgetStatus,
   getCategoryBreakdown,
   getCategoryIcon,
   getCategoryOptions,
+  getMonthIncome,
   removeBudget,
   setBudget,
+  setBudgetRollover,
+  setBudgetViewMode,
 } from '../finance/ledger';
 import type { FinanceState } from '../finance/types';
 import { useTheme } from '../theme/ThemeContext';
@@ -31,7 +35,12 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
 
+  const envelopeMode = state.preferences.budgetViewMode === 'envelope';
   const statuses = useMemo(() => getBudgetStatus(state, year, month), [state, year, month]);
+  const envelopes = useMemo(
+    () => getBudgetEnvelopes(state, year, month),
+    [state.budgets, state.transactions, year, month],
+  );
   const breakdown = useMemo(
     () => getCategoryBreakdown(state.transactions, year, month),
     [state.transactions, year, month],
@@ -42,6 +51,25 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
   const [editCategory, setEditCategory] = useState<string | null>(null);
   const [category, setCategory] = useState('Groceries');
   const [limit, setLimit] = useState('');
+  const [limitDraftByBudgetId, setLimitDraftByBudgetId] = useState<Record<string, string>>({});
+
+  const monthIncome = useMemo(() => getMonthIncome(state.transactions, year, month), [state.transactions, year, month]);
+  const totalAssigned = useMemo(() => envelopes.reduce((s, e) => s + e.assigned, 0), [envelopes]);
+  const readyToAssign = Number((monthIncome - totalAssigned).toFixed(2));
+
+  useEffect(() => {
+    if (!envelopeMode) return;
+    setLimitDraftByBudgetId((prev) => {
+      const next = { ...prev };
+      for (const e of envelopes) {
+        if (next[e.id] === undefined) next[e.id] = String(e.assigned);
+      }
+      for (const id of Object.keys(next)) {
+        if (!envelopes.some((e) => e.id === id)) delete next[id];
+      }
+      return next;
+    });
+  }, [envelopeMode, envelopes]);
 
   const totalLimit = statuses.reduce((s, b) => s + b.limit, 0);
   const totalSpent = statuses.reduce((s, b) => s + b.spent, 0);
@@ -84,11 +112,72 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
         <View style={{ flex: 1, minWidth: 240 }}>
           <Text style={[styles.title, { color: palette.text }]}>Budgets</Text>
           <Text style={[styles.subtitle, { color: palette.textMuted }]}>
-            {now.toLocaleString('default', { month: 'long', year: 'numeric' })} · {formatCurrency(totalSpent)} spent of {formatCurrency(totalLimit)} budgeted
+            {now.toLocaleString('default', { month: 'long', year: 'numeric' })} ·{' '}
+            {envelopeMode
+              ? `${formatCurrency(totalSpent)} spent · ${formatCurrency(totalAssigned)} assigned`
+              : `${formatCurrency(totalSpent)} spent of ${formatCurrency(totalLimit)} budgeted`}
           </Text>
         </View>
-        <Button label="New budget" onPress={openAdd} />
+        <View style={styles.headerActions}>
+          <View style={[styles.modeToggle, { borderColor: palette.borderSoft, backgroundColor: palette.surfaceSunken }]}>
+            <Pressable
+              onPress={() => onStateChange(setBudgetViewMode(state, 'flow'))}
+              style={({ pressed }) => [
+                styles.modePill,
+                !envelopeMode && { backgroundColor: palette.primary },
+                pressed && { opacity: 0.9 },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.modePillText,
+                  { color: !envelopeMode ? palette.primaryText : palette.textMuted },
+                ]}
+              >
+                Flow
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => onStateChange(setBudgetViewMode(state, 'envelope'))}
+              style={({ pressed }) => [
+                styles.modePill,
+                envelopeMode && { backgroundColor: palette.primary },
+                pressed && { opacity: 0.9 },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.modePillText,
+                  { color: envelopeMode ? palette.primaryText : palette.textMuted },
+                ]}
+              >
+                Envelope
+              </Text>
+            </Pressable>
+          </View>
+          <Button label="New budget" onPress={openAdd} />
+        </View>
       </View>
+
+      {envelopeMode ? (
+        <View
+          style={[
+            styles.readyBanner,
+            {
+              backgroundColor: readyToAssign >= 0 ? palette.successSoft : palette.dangerSoft,
+              borderColor: readyToAssign >= 0 ? palette.success : palette.danger,
+            },
+          ]}
+        >
+          <Text style={[styles.readyTitle, { color: palette.text }]}>Ready to assign</Text>
+          <Text style={[styles.readyAmount, { color: readyToAssign >= 0 ? palette.success : palette.danger }]}>
+            {formatCurrency(readyToAssign)}
+          </Text>
+          <Text style={[styles.readySub, { color: palette.textMuted }]}>
+            {`This month's income (${formatCurrency(monthIncome)}) minus assigned to envelopes (${formatCurrency(totalAssigned)}).`}
+          </Text>
+        </View>
+      ) : null}
 
       {statuses.length === 0 ? (
         <Card
@@ -116,6 +205,128 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
             ))}
           </View>
         </Card>
+      ) : envelopeMode ? (
+        <View style={{ gap: spacing.md }}>
+          {envelopes.map((env) => {
+            const budgetRow = state.budgets.find((b) => b.id === env.id);
+            const rolloverOn = budgetRow?.rollover !== false;
+            const denom = env.assigned > 0 ? env.assigned : 0;
+            const pct = denom > 0 ? Math.min(1, env.spent / denom) : env.spent > 0 ? 1 : 0;
+            const color =
+              env.status === 'over'
+                ? palette.danger
+                : env.status === 'warning'
+                  ? palette.warning
+                  : palette.success;
+            const draft = limitDraftByBudgetId[env.id] ?? String(env.assigned);
+            return (
+              <View
+                key={env.id}
+                style={[
+                  styles.budget,
+                  {
+                    backgroundColor: palette.surface,
+                    borderColor: palette.borderSoft,
+                  },
+                ]}
+              >
+                <View style={styles.budgetTop}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md, flex: 1 }}>
+                    <View
+                      style={[
+                        styles.iconChip,
+                        { backgroundColor: palette.surfaceSunken, borderColor: palette.borderSoft },
+                      ]}
+                    >
+                      <Text style={{ fontSize: 20 }}>{getCategoryIcon(env.category)}</Text>
+                    </View>
+                    <View style={{ flex: 1, minWidth: 160 }}>
+                      <Text style={[styles.cat, { color: palette.text }]}>{env.category}</Text>
+                      <Text style={[styles.catMeta, { color: palette.textMuted }]}>
+                        Carried in {formatCurrency(env.carriedIn)} · Spent {formatCurrency(env.spent)}
+                      </Text>
+                    </View>
+                  </View>
+                  <Badge
+                    label={
+                      env.available < 0
+                        ? 'Over assigned'
+                        : env.status === 'warning'
+                          ? 'Getting close'
+                          : 'On track'
+                    }
+                    tone={
+                      env.available < 0 ? 'danger' : env.status === 'warning' ? 'warning' : 'success'
+                    }
+                  />
+                </View>
+                <View style={styles.envelopeRow}>
+                  <View style={{ flex: 1, minWidth: 140 }}>
+                    <Text style={[styles.inlineLabel, { color: palette.textSubtle }]}>Monthly limit</Text>
+                    <Input
+                      label=""
+                      value={draft}
+                      onChangeText={(t) =>
+                        setLimitDraftByBudgetId((prev) => ({ ...prev, [env.id]: t }))
+                      }
+                      onBlur={() => {
+                        const n = Number.parseFloat(limitDraftByBudgetId[env.id] ?? draft);
+                        if (!Number.isFinite(n) || n < 0) {
+                          setLimitDraftByBudgetId((prev) => ({ ...prev, [env.id]: String(env.assigned) }));
+                          return;
+                        }
+                        onStateChange(setBudget(state, env.category, n));
+                      }}
+                      placeholder="0"
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 120, justifyContent: 'center' }}>
+                    <Text style={[styles.inlineLabel, { color: palette.textSubtle }]}>Available</Text>
+                    <Text
+                      style={[
+                        styles.availableAmt,
+                        { color: env.available < 0 ? palette.danger : palette.text },
+                      ]}
+                    >
+                      {formatCurrency(env.available)}
+                    </Text>
+                  </View>
+                  <View style={styles.rolloverCol}>
+                    <Text style={[styles.inlineLabel, { color: palette.textSubtle }]}>Rollover</Text>
+                    <Pressable
+                      onPress={() =>
+                        onStateChange(setBudgetRollover(state, env.id, !rolloverOn))
+                      }
+                      style={[
+                        styles.toggle,
+                        {
+                          backgroundColor: rolloverOn ? palette.primarySoft : palette.surfaceSunken,
+                          borderColor: rolloverOn ? palette.primary : palette.borderSoft,
+                        },
+                      ]}
+                    >
+                      <Text style={{ color: palette.text, fontWeight: '700', fontSize: typography.small }}>
+                        {rolloverOn ? 'On' : 'Off'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                  <View style={{ justifyContent: 'flex-end' }}>
+                    <Button
+                      label="Edit"
+                      size="sm"
+                      variant="secondary"
+                      onPress={() => openEdit(env.category, env.assigned)}
+                    />
+                  </View>
+                </View>
+                <View style={[styles.track, { backgroundColor: palette.surfaceSunken }]}>
+                  <View style={[styles.fill, { width: `${pct * 100}%`, backgroundColor: color }]} />
+                </View>
+              </View>
+            );
+          })}
+        </View>
       ) : (
         <View style={{ gap: spacing.md }}>
           {statuses.map((status) => {
@@ -258,6 +469,14 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
 
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap' },
+  modeToggle: { flexDirection: 'row', borderRadius: radius.pill, borderWidth: 1, padding: 3 },
+  modePill: { paddingVertical: 6, paddingHorizontal: 14, borderRadius: radius.pill },
+  modePillText: { fontSize: typography.small, fontWeight: '700' },
+  readyBanner: { borderRadius: radius.lg, borderWidth: 1, padding: spacing.lg, gap: 4 },
+  readyTitle: { fontSize: typography.micro, textTransform: 'uppercase', letterSpacing: 1, fontWeight: '700' },
+  readyAmount: { fontSize: typography.title, fontWeight: '800' },
+  readySub: { fontSize: typography.small, marginTop: 4, lineHeight: 20 },
   title: { fontSize: typography.display, fontWeight: '800' },
   subtitle: { fontSize: typography.small, marginTop: 4 },
   budget: {
@@ -286,4 +505,20 @@ const styles = StyleSheet.create({
   fill: { height: '100%', borderRadius: radius.pill },
   remaining: { fontSize: typography.small, fontWeight: '600' },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  envelopeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+    alignItems: 'flex-end',
+    marginTop: spacing.sm,
+  },
+  inlineLabel: { fontSize: typography.micro, fontWeight: '600', marginBottom: 4 },
+  availableAmt: { fontSize: typography.subtitle, fontWeight: '800' },
+  rolloverCol: { minWidth: 88, alignItems: 'flex-start' },
+  toggle: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
 });
