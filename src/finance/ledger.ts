@@ -1,5 +1,6 @@
 import seedData from '../data/financeSeed.json';
 import { CATEGORY_ICONS, CATEGORY_OPTIONS, cycleCategory, normalizeCategory } from './categories';
+import { applyRules } from './rules';
 import type {
   Budget,
   BudgetStatus,
@@ -11,6 +12,7 @@ import type {
   FinanceAccount,
   FinancialGoal,
   FinancePreferences,
+  FinanceRule,
   FinanceState,
   FinanceSummary,
   FinanceTransaction,
@@ -60,6 +62,10 @@ function cloneBudgets(budgets: Budget[]): Budget[] {
 
 function cloneGoals(goals: FinancialGoal[]): FinancialGoal[] {
   return goals.map((g) => ({ ...g }));
+}
+
+function cloneRules(rules: FinanceRule[]): FinanceRule[] {
+  return rules.map((r) => ({ ...r }));
 }
 
 function normalizeTransaction(transaction: FinanceTransaction): FinanceTransaction {
@@ -113,6 +119,7 @@ export function createFinanceState(): FinanceState {
     imports,
     budgets,
     goals,
+    rules: [],
     preferences: mergePreferences(
       (seedData as { preferences?: Partial<FinancePreferences> }).preferences,
     ),
@@ -137,6 +144,9 @@ export function rehydrateFinanceState(snapshot: Partial<FinanceState> | null | u
     imports: cloneImports(snapshot.imports?.length ? (snapshot.imports as ImportRecord[]) : seed.imports),
     budgets: cloneBudgets(snapshot.budgets ?? seed.budgets),
     goals: cloneGoals(snapshot.goals ?? seed.goals),
+    rules: cloneRules(
+      Array.isArray(snapshot.rules) ? (snapshot.rules as FinanceRule[]) : seed.rules,
+    ),
     preferences: mergePreferences(snapshot.preferences ?? seed.preferences),
   };
 }
@@ -360,7 +370,8 @@ export function applyImportedBatch(
 ): FinanceState {
   const existingKeys = new Set(state.transactions.map(getTransactionKey));
   const incoming = batch.rows.map((row) => mapImportedRowToTransaction(row, accountId, batch.sourceLabel));
-  const deduped = incoming.filter((transaction) => !existingKeys.has(getTransactionKey(transaction)));
+  const withRules = incoming.map((transaction) => applyRules(transaction, state.rules));
+  const deduped = withRules.filter((transaction) => !existingKeys.has(getTransactionKey(transaction)));
   const importRecord: ImportRecord = {
     id: createId('imp'),
     fileName: batch.sourceLabel,
@@ -381,6 +392,14 @@ export function applyImportedBatch(
 
 export function resetFinanceState(): FinanceState {
   return createFinanceState();
+}
+
+/** Re-run user rules on every transaction, overwriting categories where a rule matches. */
+export function reapplyRulesToAllTransactions(state: FinanceState): FinanceState {
+  return {
+    ...state,
+    transactions: state.transactions.map((tx) => applyRules(tx, state.rules)),
+  };
 }
 
 export function hasUnreviewedTransactions(state: FinanceState): boolean {
