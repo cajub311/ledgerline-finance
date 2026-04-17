@@ -20,6 +20,7 @@ import type {
   MonthlyTrendItem,
   ParsedStatementBatch,
   ParsedStatementRow,
+  ProjectedRecurringItem,
   TopMerchantItem,
 } from './types';
 
@@ -661,6 +662,151 @@ export function detectRecurringIncome(transactions: FinanceTransaction[]): Detec
   }
 
   return incomes.sort((a, b) => b.annualTotal - a.annualTotal);
+}
+
+function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function parseIsoDateLocal(iso: string): Date {
+  const [y, m, d] = iso.split('-').map((n) => Number.parseInt(n, 10));
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return new Date(NaN);
+  return new Date(y, m - 1, d);
+}
+
+function addCalendarDays(date: Date, days: number): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+}
+
+function averageGapDaysBetweenSortedDates(sortedIsoDates: string[]): number | null {
+  if (sortedIsoDates.length < 2) return null;
+  const times = sortedIsoDates.map((iso) => parseIsoDateLocal(iso).getTime());
+  if (times.some((t) => !Number.isFinite(t))) return null;
+  const gaps: number[] = [];
+  for (let i = 1; i < times.length; i++) {
+    gaps.push((times[i]! - times[i - 1]!) / (1000 * 60 * 60 * 24));
+  }
+  return gaps.reduce((s, g) => s + g, 0) / gaps.length;
+}
+
+function defaultGapDaysForFrequency(frequency: DetectedSubscription['frequency']): number {
+  if (frequency === 'weekly') return 7;
+  if (frequency === 'monthly') return 30;
+  return 365;
+}
+
+function patternConfidence(occurrences: number): number {
+  const raw = 0.35 + 0.12 * Math.max(0, occurrences - 2);
+  return Number(Math.min(0.95, raw).toFixed(4));
+}
+
+function transactionsForRecurringPayee(
+  transactions: FinanceTransaction[],
+  payeeNorm: string,
+  kind: 'charge' | 'income',
+): FinanceTransaction[] {
+  return transactions.filter((tx) => {
+    if (tx.payee.trim().toLowerCase() !== payeeNorm) return false;
+    if (kind === 'charge') return tx.amount < 0;
+    return tx.amount > 0;
+  });
+}
+
+/**
+ * Project next recurring charges and income from detected patterns.
+ * Each next date is prior occurrence + average gap (from matching txs), rolling until past the horizon.
+ */
+export function projectRecurring(
+  state: FinanceState,
+  horizonDays: number,
+  asOf: Date = new Date(),
+): ProjectedRecurringItem[] {
+  const txs = state.transactions;
+  const today = startOfLocalDay(asOf);
+  const horizonEnd = addCalendarDays(today, Math.max(0, horizonDays));
+  const horizonEndTime = horizonEnd.getTime();
+
+  const rows: ProjectedRecurringItem[] = [];
+
+  const pushOccurrences = (
+    lastIso: string,
+    payee: string,
+    payeeNorm: string,
+    kind: 'charge' | 'income',
+    frequency: ProjectedRecurringItem['frequency'],
+    medianAmount: number,
+    occurrences: number,
+  ) => {
+    const related = transactionsForRecurringPayee(txs, payeeNorm, kind);
+    const dates = [...new Set(related.map((t) => t.date))].sort((a, b) => a.localeCompare(b));
+    let gap = averageGapDaysBetweenSortedDates(dates);
+    if (gap === null || !Number.isFinite(gap) || gap < 1) {
+      gap = defaultGapDaysForFrequency(frequency);
+    }
+    const gapRounded = Math.max(1, Math.round(gap));
+    const confidence = patternConfidence(occurrences);
+
+    let next = addCalendarDays(parseIsoDateLocal(lastIso), gapRounded);
+    if (!Number.isFinite(next.getTime())) return;
+
+    while (next.getTime() < today.getTime()) {
+      next = addCalendarDays(next, gapRounded);
+    }
+
+    while (next.getTime() <= horizonEndTime) {
+      const dateStr = toIsoDateStatic(next);
+      const signedAmount = kind === 'charge' ? -Math.abs(medianAmount) : Math.abs(medianAmount);
+      rows.push({
+        date: dateStr,
+        payee,
+        amount: Number(signedAmount.toFixed(2)),
+        frequency,
+        kind,
+        confidence,
+      });
+      next = addCalendarDays(next, gapRounded);
+    }
+  };
+
+  for (const sub of detectSubscriptions(txs)) {
+    pushOccurrences(
+      sub.lastCharged,
+      sub.payee,
+      sub.payee.trim().toLowerCase(),
+      'charge',
+      sub.frequency,
+      sub.amount,
+      sub.occurrences,
+    );
+  }
+
+  for (const inc of detectRecurringIncome(txs)) {
+    pushOccurrences(
+      inc.lastReceived,
+      inc.payee,
+      inc.payee.trim().toLowerCase(),
+      'income',
+      inc.frequency,
+      inc.amount,
+      inc.occurrences,
+    );
+  }
+
+  const dedupe = new Map<string, ProjectedRecurringItem>();
+  for (const row of rows) {
+    const key = `${row.date}|${row.kind}|${row.payee.trim().toLowerCase()}`;
+    const prev = dedupe.get(key);
+    if (!prev || prev.confidence < row.confidence) {
+      dedupe.set(key, row);
+    }
+  }
+
+  return [...dedupe.values()].sort((a, b) => {
+    const c = a.date.localeCompare(b.date);
+    if (c !== 0) return c;
+    if (a.kind !== b.kind) return a.kind === 'charge' ? -1 : 1;
+    return a.payee.localeCompare(b.payee);
+  });
 }
 
 function monthSpendExcludingTransfer(transactions: FinanceTransaction[], year: number, month: number): number {
