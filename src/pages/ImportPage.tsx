@@ -5,7 +5,7 @@ import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
-import { buildTransactionsCsv } from '../finance/export';
+import { buildFullLedgerCsv, buildTransactionsCsv } from '../finance/export';
 import { parseStatementBlob } from '../finance/import';
 import {
   mappingIsComplete,
@@ -98,9 +98,12 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
     try {
       setBusy(true);
       const files = await pickWebStatementFiles();
-      const file = files.find((f) => f.name.toLowerCase().endsWith('.csv'));
+      const file = files.find((f) => {
+        const n = f.name.toLowerCase();
+        return n.endsWith('.csv') || n.endsWith('.tsv') || n.endsWith('.txt');
+      });
       if (!file) {
-        notify('Select a .csv file for the mapping wizard.', 'danger');
+        notify('Select a .csv, .tsv, or .txt delimited file for the mapping wizard.', 'danger');
         return;
       }
       const text = await file.text();
@@ -225,6 +228,19 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
     notify(`Exported ${state.transactions.length} transactions to CSV.`, 'success');
   };
 
+  const exportFullCsv = () => {
+    if (typeof document === 'undefined') return;
+    const csv = buildFullLedgerCsv(state);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `ledgerline-full-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    notify('Exported full ledger (transactions, accounts, budgets, goals, import history) to CSV.', 'success');
+  };
+
   const exportJson = () => {
     if (typeof document === 'undefined') return;
     const blob = new Blob([serializeFinanceState(state)], { type: 'application/json' });
@@ -262,7 +278,8 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
       <View>
         <Text style={[styles.title, { color: palette.text }]}>Import & export</Text>
         <Text style={[styles.subtitle, { color: palette.textMuted }]}>
-          Upload statements from any bank (CSV, XLSX, or PDF), paste text, or back up your whole ledger.
+          Upload statements from any bank (CSV, TSV, semicolon-separated, XLSX, or PDF), paste text, or export your
+          ledger for backups and spreadsheets.
         </Text>
       </View>
 
@@ -318,8 +335,8 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
 
       <Card title="CSV import wizard" eyebrow="Preview · map columns · dedupe">
         <Text style={{ color: palette.textMuted, fontSize: typography.small, lineHeight: 19, marginBottom: spacing.md }}>
-          For bank CSVs (Wells Fargo, Chase, etc.): we auto-suggest column roles. Preview the first 10 rows, adjust
-          mappings, then import. Duplicates are skipped using the same date + payee + amount key as quick import.
+          For bank exports (CSV, TSV, or semicolon-separated): we auto-suggest column roles. Preview the first 10 rows,
+          adjust mappings, then import. Duplicates are skipped using the same date + payee + amount key as quick import.
         </Text>
         <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap', marginBottom: spacing.md }}>
           <Button
@@ -413,10 +430,10 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
       </Card>
 
       <View style={styles.grid}>
-        <Card title="Upload files" eyebrow="CSV · XLSX · PDF" style={styles.flex1}>
+        <Card title="Upload files" eyebrow="CSV · TSV · XLSX · PDF" style={styles.flex1}>
           <Text style={{ color: palette.textMuted, fontSize: typography.small, lineHeight: 19 }}>
-            We detect the column headers automatically for most banks. Duplicates are skipped by
-            date, payee, and amount.
+            We detect delimiters (comma, tab, semicolon) and column headers for most banks. PDFs use position-aware text
+            extraction when possible. Duplicates are skipped by date, payee, and amount.
           </Text>
           <Button
             label={busy ? 'Importing…' : 'Choose file(s)'}
@@ -459,6 +476,7 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
         </Text>
         <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
           <Button label="Export CSV (transactions)" variant="secondary" onPress={exportCsv} />
+          <Button label="Export CSV (full ledger)" variant="secondary" onPress={exportFullCsv} />
           <Button label="Export JSON backup" onPress={exportJson} />
           <Button label="Restore from JSON" variant="ghost" onPress={importBackup} disabled={busy} />
         </View>

@@ -90,7 +90,10 @@ function toIsoDate(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-function splitCsvLine(line: string): string[] {
+export type DelimiterChar = ',' | '\t' | ';';
+
+/** RFC-style split with optional delimiter (comma default). */
+export function splitDelimitedLine(line: string, delimiter: DelimiterChar = ','): string[] {
   const cells: string[] = [];
   let current = '';
   let inQuotes = false;
@@ -110,7 +113,7 @@ function splitCsvLine(line: string): string[] {
       continue;
     }
 
-    if (char === ',' && !inQuotes) {
+    if (char === delimiter && !inQuotes) {
       cells.push(current.trim());
       current = '';
       continue;
@@ -121,6 +124,26 @@ function splitCsvLine(line: string): string[] {
 
   cells.push(current.trim());
   return cells;
+}
+
+function splitCsvLine(line: string): string[] {
+  return splitDelimitedLine(line, ',');
+}
+
+export function inferDelimiterFromHeaderLine(headerLine: string): DelimiterChar {
+  const tabCount = (headerLine.match(/\t/g) ?? []).length;
+  const semiCount = (headerLine.match(/;/g) ?? []).length;
+  const tabCols = splitDelimitedLine(headerLine, '\t').length;
+  const semiCols = splitDelimitedLine(headerLine, ';').length;
+  const commaCols = splitDelimitedLine(headerLine, ',').length;
+
+  if (tabCount >= 1 && tabCols >= 3 && tabCols >= commaCols - 1) {
+    return '\t';
+  }
+  if (semiCount >= 2 && semiCols >= 3 && semiCols > commaCols) {
+    return ';';
+  }
+  return ',';
 }
 
 function normalizeHeaders(headers: string[]): string[] {
@@ -153,10 +176,11 @@ export function previewDelimitedCsv(text: string, maxDataRows = 10): CsvPreviewR
     return null;
   }
 
-  const headers = splitCsvLine(lines[0]).map((cell) => cell.trim());
+  const delimiter = inferDelimiterFromHeaderLine(lines[0]);
+  const headers = splitDelimitedLine(lines[0], delimiter).map((cell) => cell.trim());
   const rows = lines
     .slice(1, 1 + maxDataRows)
-    .map((line) => splitCsvLine(line).map((cell) => cell.trim()));
+    .map((line) => splitDelimitedLine(line, delimiter).map((cell) => cell.trim()));
 
   return { headers, rows };
 }
@@ -243,6 +267,8 @@ export function parseDelimitedWithMapping(text: string, roles: WizardColumnRole[
     return [];
   }
 
+  const delimiter = inferDelimiterFromHeaderLine(lines[0]);
+
   const syntheticHeaders = ['date', 'payee', 'amount'];
   if (mapping.category >= 0) {
     syntheticHeaders.push('category');
@@ -251,7 +277,7 @@ export function parseDelimitedWithMapping(text: string, roles: WizardColumnRole[
   const out: ParsedStatementRow[] = [];
 
   for (let li = 1; li < lines.length; li += 1) {
-    const cells = splitCsvLine(lines[li]).map((c) => c.trim());
+    const cells = splitDelimitedLine(lines[li], delimiter).map((c) => c.trim());
     const dateVal = cells[mapping.date] ?? '';
     const payeeVal = cells[mapping.payee] ?? '';
     let amountVal: unknown = '';
@@ -373,10 +399,11 @@ export function parseDelimitedStatement(text: string): ParsedStatementRow[] {
     return [];
   }
 
-  const header = splitCsvLine(lines[0]).map((entry) => entry.trim().toLowerCase());
+  const delimiter = inferDelimiterFromHeaderLine(lines[0]);
+  const header = splitDelimitedLine(lines[0], delimiter).map((entry) => entry.trim().toLowerCase());
   const rows = lines
     .slice(1)
-    .map((line) => splitCsvLine(line))
+    .map((line) => splitDelimitedLine(line, delimiter))
     .map((row) => rowToStatementRow(row, header))
     .filter((entry): entry is ParsedStatementRow => entry !== null);
 
@@ -414,7 +441,7 @@ export function parseStatementText(text: string): ParsedStatementBatch {
     .map((line) => {
       const compact = line.replace(/\s+/g, ' ');
       const match = compact.match(
-        /^(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)\s+(.+?)\s+([(-]?\$?\d[\d,]*\.\d{2}\)?)$/,
+        /^(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)\s+(.+?)\s+([(-]?\$?\d[\d,]*(?:\.\d{2})?\)?)$/,
       );
 
       if (!match) {

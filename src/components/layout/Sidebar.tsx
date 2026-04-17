@@ -146,7 +146,7 @@ export function Sidebar<T extends string>({
       <View style={styles.footerNote}>
         <Text style={[styles.footerTitle, { color: palette.text }]}>Local-first</Text>
         <Text style={[styles.footerText, { color: palette.textSubtle }]}>
-          Your ledger lives in this browser. Export a backup from Settings any time.
+          Your ledger lives in this browser. Export JSON or CSV from Import any time.
         </Text>
       </View>
     </View>
