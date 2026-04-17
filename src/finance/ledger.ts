@@ -20,6 +20,7 @@ import type {
   MonthlyTrendItem,
   ParsedStatementBatch,
   ParsedStatementRow,
+  ProjectedRecurringItem,
   TopMerchantItem,
 } from './types';
 
@@ -599,6 +600,7 @@ export function detectSubscriptions(transactions: FinanceTransaction[]): Detecte
       lastCharged: sorted[0].date,
       annualCost: Number(annualCost.toFixed(2)),
       occurrences: txs.length,
+      averageGapDays: Number(avgGap.toFixed(2)),
     });
   }
 
@@ -657,10 +659,136 @@ export function detectRecurringIncome(transactions: FinanceTransaction[]): Detec
       lastReceived: sorted[0].date,
       annualTotal: Number(annualTotal.toFixed(2)),
       occurrences: txs.length,
+      averageGapDays: Number(avgGap.toFixed(2)),
     });
   }
 
   return incomes.sort((a, b) => b.annualTotal - a.annualTotal);
+}
+
+function parseLocalDate(isoDate: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate.trim());
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const dt = new Date(y, mo - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
+  return dt;
+}
+
+function addCalendarDaysLocal(isoDate: string, days: number): string {
+  const dt = parseLocalDate(isoDate);
+  if (!dt) return isoDate;
+  dt.setDate(dt.getDate() + days);
+  return toIsoDateStatic(dt);
+}
+
+function recurringConfidence(occurrences: number): number {
+  const raw = 0.35 + 0.12 * Math.max(0, occurrences - 2);
+  return Number(Math.min(0.95, raw).toFixed(4));
+}
+
+/**
+ * Project discrete upcoming charges and income from detected recurring patterns.
+ * Next occurrence = last occurrence + average gap (from detection); repeats until past horizon.
+ * Dates are YYYY-MM-DD only; confidence is capped at 0.95.
+ * @param todayOverride YYYY-MM-DD for tests only; defaults to the device clock.
+ */
+export function projectRecurring(
+  state: FinanceState,
+  horizonDays: number,
+  todayOverride?: string,
+): ProjectedRecurringItem[] {
+  const todayStr =
+    todayOverride && /^\d{4}-\d{2}-\d{2}$/.test(todayOverride.trim())
+      ? todayOverride.trim()
+      : (() => {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          return toIsoDateStatic(today);
+        })();
+  const h = Math.max(0, Math.floor(horizonDays));
+  const lastAllowed = addCalendarDaysLocal(todayStr, h);
+
+  const subs = detectSubscriptions(state.transactions);
+  const incomes = detectRecurringIncome(state.transactions);
+
+  const rows: ProjectedRecurringItem[] = [];
+
+  const pushOccurrences = (
+    lastIso: string,
+    gapDays: number,
+    payee: string,
+    signedAmount: number,
+    frequency: ProjectedRecurringItem['frequency'],
+    kind: ProjectedRecurringItem['kind'],
+    occurrences: number,
+  ) => {
+    const gap = Math.max(1, Math.round(gapDays));
+    let next = addCalendarDaysLocal(lastIso, gap);
+    let guard = 0;
+    while (next <= lastIso && guard < 500) {
+      next = addCalendarDaysLocal(next, gap);
+      guard += 1;
+    }
+    guard = 0;
+    while (next < todayStr && guard < 500) {
+      next = addCalendarDaysLocal(next, gap);
+      guard += 1;
+    }
+    guard = 0;
+    while (next <= lastAllowed && guard < 500) {
+      rows.push({
+        date: next,
+        payee,
+        amount: Number(signedAmount.toFixed(2)),
+        frequency,
+        kind,
+        confidence: recurringConfidence(occurrences),
+      });
+      next = addCalendarDaysLocal(next, gap);
+      guard += 1;
+    }
+  };
+
+  for (const s of subs) {
+    pushOccurrences(
+      s.lastCharged,
+      s.averageGapDays,
+      s.payee,
+      -Math.abs(s.amount),
+      s.frequency,
+      'charge',
+      s.occurrences,
+    );
+  }
+
+  for (const i of incomes) {
+    pushOccurrences(
+      i.lastReceived,
+      i.averageGapDays,
+      i.payee,
+      Math.abs(i.amount),
+      i.frequency,
+      'income',
+      i.occurrences,
+    );
+  }
+
+  const dedupe = new Set<string>();
+  return rows
+    .filter((r) => {
+      const key = `${r.date}|${r.kind}|${r.payee.trim().toLowerCase()}|${r.amount.toFixed(2)}`;
+      if (dedupe.has(key)) return false;
+      dedupe.add(key);
+      return true;
+    })
+    .sort((a, b) => {
+      const c = a.date.localeCompare(b.date);
+      if (c !== 0) return c;
+      return a.payee.localeCompare(b.payee);
+    });
 }
 
 function monthSpendExcludingTransfer(transactions: FinanceTransaction[], year: number, month: number): number {

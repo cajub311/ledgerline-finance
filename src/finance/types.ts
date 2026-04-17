@@ -129,6 +129,8 @@ export interface DetectedSubscription {
   lastCharged: string;
   annualCost: number;
   occurrences: number;
+  /** Mean spacing between observed occurrences in days (used for projections). */
+  averageGapDays: number;
 }
 
 export interface BudgetStatus {
@@ -153,6 +155,8 @@ export interface DetectedRecurringIncome {
   lastReceived: string;
   annualTotal: number;
   occurrences: number;
+  /** Mean spacing between observed occurrences in days (used for projections). */
+  averageGapDays: number;
 }
 
 export interface CashFlowProjectionPoint {
@@ -166,4 +170,15 @@ export interface CashFlowProjection {
   belowThresholdDates: string[];
   startBalance: number;
   horizonDays: number;
+}
+
+/** Projected upcoming charge or income from detected recurring patterns (local-only heuristic). */
+export interface ProjectedRecurringItem {
+  date: string;
+  payee: string;
+  amount: number;
+  frequency: 'weekly' | 'monthly' | 'annual';
+  kind: 'charge' | 'income';
+  /** Detection strength 0–0.95 (capped). */
+  confidence: number;
 }
