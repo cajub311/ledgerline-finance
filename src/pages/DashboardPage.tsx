@@ -1,11 +1,12 @@
-import { useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Badge } from '../components/ui/Badge';
 import { Card } from '../components/ui/Card';
 import { StatTile } from '../components/ui/StatTile';
 import { IncomeSpendBars } from '../components/charts/BarChart';
 import { CategoryBreakdownList } from '../components/charts/CategoryBreakdownList';
+import { NetWorthLineChart } from '../components/charts/NetWorthLineChart';
 import {
   detectSubscriptions,
   generateInsights,
@@ -17,6 +18,7 @@ import {
   getFinancialHealthScore,
   getLatestTransactions,
   getMonthlyTrend,
+  getNetWorthSeries,
   getSafeToSpend,
   getSavingsRate,
   getTopMerchants,
@@ -30,11 +32,18 @@ interface DashboardPageProps {
   state: FinanceState;
 }
 
+type NetWorthHorizon = 3 | 6 | 12 | 0;
+
 export function DashboardPage({ state }: DashboardPageProps) {
   const { palette } = useTheme();
   const summary = useMemo(() => getFinanceSummary(state), [state]);
   const savingsRate = useMemo(() => getSavingsRate(state), [state]);
   const trend = useMemo(() => getMonthlyTrend(state.transactions, 6), [state.transactions]);
+  const [netWorthMonths, setNetWorthMonths] = useState<NetWorthHorizon>(6);
+  const netWorthSeries = useMemo(
+    () => getNetWorthSeries(state, netWorthMonths),
+    [state, netWorthMonths],
+  );
 
   const now = new Date();
   const year = now.getFullYear();
@@ -128,6 +137,54 @@ export function DashboardPage({ state }: DashboardPageProps) {
           footer={savingsRate >= 20 ? 'Healthy' : savingsRate > 0 ? 'Keep building' : 'No savings this month'}
         />
       </View>
+
+      <Card
+        title="Net worth trend"
+        eyebrow="End of month"
+        action={
+          <View style={styles.pillRow}>
+            {(
+              [
+                { value: 3 as const, label: '3M' },
+                { value: 6 as const, label: '6M' },
+                { value: 12 as const, label: '12M' },
+                { value: 0 as const, label: 'ALL' },
+              ] as const
+            ).map((opt) => {
+              const selected = netWorthMonths === opt.value;
+              return (
+                <Pressable
+                  key={opt.label}
+                  onPress={() => setNetWorthMonths(opt.value)}
+                  style={[
+                    styles.horizonPill,
+                    {
+                      backgroundColor: selected ? palette.primary : palette.surfaceSunken,
+                      borderColor: selected ? palette.primary : palette.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      fontSize: typography.micro,
+                      fontWeight: '700',
+                      color: selected ? palette.primaryText : palette.textMuted,
+                    }}
+                  >
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        }
+      >
+        {netWorthSeries.length === 0 ? (
+          <Text style={{ color: palette.textSubtle, fontSize: typography.small }}>No data yet.</Text>
+        ) : (
+          <NetWorthLineChart data={netWorthSeries} />
+        )}
+      </Card>
 
       <View style={styles.twoCol}>
         <Card title="Income vs spend" eyebrow="Last 6 months" style={styles.flex2}>
@@ -375,5 +432,17 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 1,
     padding: spacing.md,
+  },
+  pillRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    alignItems: 'center',
+  },
+  horizonPill: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: radius.pill,
+    borderWidth: 1,
   },
 });
