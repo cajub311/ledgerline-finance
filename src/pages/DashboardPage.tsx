@@ -7,6 +7,7 @@ import { StatTile } from '../components/ui/StatTile';
 import { IncomeSpendBars } from '../components/charts/BarChart';
 import { CategoryBreakdownList } from '../components/charts/CategoryBreakdownList';
 import {
+  countOverBudgetEnvelopes,
   detectSubscriptions,
   generateInsights,
   getAccountsWithBalances,
@@ -63,7 +64,10 @@ export function DashboardPage({ state }: DashboardPageProps) {
   const monthLabel = now.toLocaleString('default', { month: 'long', year: 'numeric' });
   const monthName = now.toLocaleString('default', { month: 'long' });
   const net = summary.monthIncome - summary.monthSpend;
-  const overBudget = budgetStatuses.filter((b) => b.status === 'over').length;
+  const envelopeMode = state.preferences.budgetsViewMode === 'envelope';
+  const overBudget = envelopeMode
+    ? countOverBudgetEnvelopes(state, year, month)
+    : budgetStatuses.filter((b) => b.status === 'over').length;
   const subsMonthly = subs.filter((s) => s.frequency === 'monthly').reduce((s, c) => s + c.amount, 0);
   const safeToSpend = useMemo(() => getSafeToSpend(state), [state]);
   const health = useMemo(() => getFinancialHealthScore(state), [state]);
