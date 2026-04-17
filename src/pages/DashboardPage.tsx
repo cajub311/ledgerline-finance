@@ -1,11 +1,12 @@
-import { useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Badge } from '../components/ui/Badge';
 import { Card } from '../components/ui/Card';
 import { StatTile } from '../components/ui/StatTile';
 import { IncomeSpendBars } from '../components/charts/BarChart';
 import { CategoryBreakdownList } from '../components/charts/CategoryBreakdownList';
+import { NetWorthLineChart } from '../components/charts/NetWorthLineChart';
 import {
   detectSubscriptions,
   generateInsights,
@@ -17,11 +18,12 @@ import {
   getFinancialHealthScore,
   getLatestTransactions,
   getMonthlyTrend,
+  getNetWorthSeries,
   getSafeToSpend,
   getSavingsRate,
   getTopMerchants,
 } from '../finance/ledger';
-import type { FinanceState } from '../finance/types';
+import type { FinanceState, NetWorthSeriesWindow } from '../finance/types';
 import { useTheme } from '../theme/ThemeContext';
 import { radius, spacing, typography } from '../theme/tokens';
 import { formatCurrency } from '../utils/format';
@@ -32,6 +34,7 @@ interface DashboardPageProps {
 
 export function DashboardPage({ state }: DashboardPageProps) {
   const { palette } = useTheme();
+  const [nwWindow, setNwWindow] = useState<NetWorthSeriesWindow>(6);
   const summary = useMemo(() => getFinanceSummary(state), [state]);
   const savingsRate = useMemo(() => getSavingsRate(state), [state]);
   const trend = useMemo(() => getMonthlyTrend(state.transactions, 6), [state.transactions]);
@@ -67,6 +70,7 @@ export function DashboardPage({ state }: DashboardPageProps) {
   const subsMonthly = subs.filter((s) => s.frequency === 'monthly').reduce((s, c) => s + c.amount, 0);
   const safeToSpend = useMemo(() => getSafeToSpend(state), [state]);
   const health = useMemo(() => getFinancialHealthScore(state), [state]);
+  const netWorthSeries = useMemo(() => getNetWorthSeries(state, nwWindow), [state, nwWindow]);
 
   return (
     <View style={{ gap: spacing.lg }}>
@@ -128,6 +132,54 @@ export function DashboardPage({ state }: DashboardPageProps) {
           footer={savingsRate >= 20 ? 'Healthy' : savingsRate > 0 ? 'Keep building' : 'No savings this month'}
         />
       </View>
+
+      <Card
+        title="Net worth trend"
+        eyebrow="End-of-month balances (last point is current ledger)"
+        action={
+          <View style={styles.pillRow}>
+            {(
+              [
+                { key: 3 as const, label: '3M' },
+                { key: 6 as const, label: '6M' },
+                { key: 12 as const, label: '12M' },
+                { key: 'all' as const, label: 'ALL' },
+              ] as const
+            ).map((opt) => {
+              const active = nwWindow === opt.key;
+              return (
+                <Pressable
+                  key={String(opt.key)}
+                  onPress={() => setNwWindow(opt.key)}
+                  style={[
+                    styles.periodPill,
+                    {
+                      backgroundColor: active ? palette.primary : palette.surfaceSunken,
+                      borderColor: active ? palette.primary : palette.borderSoft,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      fontWeight: '800',
+                      color: active ? palette.primaryText : palette.textMuted,
+                    }}
+                  >
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        }
+      >
+        {netWorthSeries.length === 0 ? (
+          <Text style={{ color: palette.textSubtle, fontSize: typography.small }}>No data for this range.</Text>
+        ) : (
+          <NetWorthLineChart data={netWorthSeries} />
+        )}
+      </Card>
 
       <View style={styles.twoCol}>
         <Card title="Income vs spend" eyebrow="Last 6 months" style={styles.flex2}>
@@ -337,6 +389,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.md,
+  },
+  pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  periodPill: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    borderWidth: 1,
   },
   twoCol: {
     flexDirection: 'row',
