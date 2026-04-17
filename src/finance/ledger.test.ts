@@ -2,13 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { parseDelimitedStatement } from './import.shared';
+import type { Budget, FinanceState } from './types';
 import {
   addManualTransaction,
   applyImportedBatch,
   createFinanceState,
+  getBudgetEnvelopes,
   getBudgetStatus,
   getFinanceSummary,
   getSafeToSpend,
+  rehydrateFinanceState,
   rotateTransactionCategory,
   setBudget,
 } from './ledger';
@@ -79,4 +82,185 @@ test('setBudget adds a category limit visible in budget status', () => {
 
   assert.ok(row);
   assert.equal(row?.limit, 100);
+});
+
+test('envelope carry math across three months with rollover', () => {
+  const base = createFinanceState();
+  const cat = 'EnvelopeTestCat';
+  const b: Budget = {
+    id: 'bgt-env-test',
+    category: cat,
+    monthlyLimit: 100,
+    createdAt: '2026-01-15T12:00:00.000Z',
+    rollover: true,
+  };
+  const state: FinanceState = {
+    ...base,
+    budgets: [b],
+    transactions: [
+      {
+        id: 'e1',
+        accountId: 'acct-wf-checking',
+        date: '2026-01-10',
+        payee: 'Shop',
+        amount: -40,
+        category: cat,
+        source: 'manual',
+        reviewed: true,
+      },
+      {
+        id: 'e2',
+        accountId: 'acct-wf-checking',
+        date: '2026-02-05',
+        payee: 'Shop',
+        amount: -30,
+        category: cat,
+        source: 'manual',
+        reviewed: true,
+      },
+      {
+        id: 'e3',
+        accountId: 'acct-wf-checking',
+        date: '2026-03-05',
+        payee: 'Shop',
+        amount: -20,
+        category: cat,
+        source: 'manual',
+        reviewed: true,
+      },
+    ],
+  };
+
+  const jan = getBudgetEnvelopes(state, 2026, 1)[0];
+  const feb = getBudgetEnvelopes(state, 2026, 2)[0];
+  const mar = getBudgetEnvelopes(state, 2026, 3)[0];
+
+  assert.equal(jan.carriedIn, 0);
+  assert.equal(jan.assigned, 100);
+  assert.equal(jan.spent, 40);
+  assert.equal(jan.available, 60);
+
+  assert.equal(feb.carriedIn, 60);
+  assert.equal(feb.available, 130);
+
+  assert.equal(mar.carriedIn, 130);
+  assert.equal(mar.available, 210);
+});
+
+test('toggling rollover mid-stream drops surplus but keeps debt', () => {
+  const base = createFinanceState();
+  const cat = 'RolloverToggleCat';
+  let b: Budget = {
+    id: 'bgt-roll',
+    category: cat,
+    monthlyLimit: 100,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    rollover: true,
+  };
+  const txs = [
+    {
+      id: 'r1',
+      accountId: 'acct-wf-checking',
+      date: '2026-01-20',
+      payee: 'X',
+      amount: -20,
+      category: cat,
+      source: 'manual' as const,
+      reviewed: true,
+    },
+    {
+      id: 'r2',
+      accountId: 'acct-wf-checking',
+      date: '2026-02-20',
+      payee: 'X',
+      amount: -150,
+      category: cat,
+      source: 'manual' as const,
+      reviewed: true,
+    },
+  ];
+  let state: FinanceState = { ...base, budgets: [b], transactions: [...base.transactions, ...txs] };
+
+  const febOn = getBudgetEnvelopes(state, 2026, 2)[0];
+  assert.equal(febOn.carriedIn, 80);
+
+  b = { ...b, rollover: false };
+  state = { ...state, budgets: [b] };
+  const febOff = getBudgetEnvelopes(state, 2026, 2)[0];
+  assert.equal(febOff.carriedIn, 0);
+  assert.equal(febOff.available, -50);
+
+  const marOff = getBudgetEnvelopes(state, 2026, 3)[0];
+  assert.ok(marOff.carriedIn < 0);
+  assert.equal(marOff.assigned, 100);
+});
+
+test('budget created after months with spending still gets correct carry from creation', () => {
+  const base = createFinanceState();
+  const cat = 'LateBudgetCat';
+  const b: Budget = {
+    id: 'bgt-late',
+    category: cat,
+    monthlyLimit: 50,
+    createdAt: '2026-03-01T00:00:00.000Z',
+    rollover: true,
+  };
+  const state: FinanceState = {
+    ...base,
+    budgets: [b],
+    transactions: [
+      {
+        id: 'l1',
+        accountId: 'acct-wf-checking',
+        date: '2026-01-15',
+        payee: 'Past',
+        amount: -200,
+        category: cat,
+        source: 'manual',
+        reviewed: true,
+      },
+      {
+        id: 'l2',
+        accountId: 'acct-wf-checking',
+        date: '2026-03-10',
+        payee: 'Now',
+        amount: -10,
+        category: cat,
+        source: 'manual',
+        reviewed: true,
+      },
+    ],
+  };
+
+  const mar = getBudgetEnvelopes(state, 2026, 3)[0];
+  assert.equal(mar.carriedIn, 0);
+  assert.equal(mar.spent, 10);
+  assert.equal(mar.available, 40);
+});
+
+test('getBudgetEnvelopes is idempotent for the same inputs', () => {
+  const state = setBudget(createFinanceState(), 'TestCat', 100);
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth() + 1;
+  const a = getBudgetEnvelopes(state, y, m);
+  const b = getBudgetEnvelopes(state, y, m);
+  assert.deepEqual(a, b);
+});
+
+test('rehydrate fills default rollover and budgetsViewMode on budgets', () => {
+  const raw = {
+    version: 1,
+    householdName: 'T',
+    currency: 'USD' as const,
+    accounts: [],
+    transactions: [],
+    imports: [],
+    budgets: [{ id: 'x', category: 'C', monthlyLimit: 10, createdAt: '2026-01-01T00:00:00.000Z' }],
+    goals: [],
+    preferences: { forecastLowBalanceThreshold: 0 },
+  };
+  const s = rehydrateFinanceState(raw as unknown as Partial<FinanceState>);
+  assert.equal(s.budgets[0]?.rollover, true);
+  assert.equal(s.preferences.budgetsViewMode, 'flow');
 });
