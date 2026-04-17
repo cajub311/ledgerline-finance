@@ -2,6 +2,7 @@ import seedData from '../data/financeSeed.json';
 import { CATEGORY_ICONS, CATEGORY_OPTIONS, cycleCategory, normalizeCategory } from './categories';
 import type {
   Budget,
+  BudgetEnvelope,
   BudgetStatus,
   CashFlowProjection,
   CashFlowProjectionPoint,
@@ -25,6 +26,7 @@ import type {
 
 const DEFAULT_PREFERENCES: FinancePreferences = {
   forecastLowBalanceThreshold: 500,
+  envelopeBudgeting: false,
 };
 
 function mergePreferences(partial?: Partial<FinancePreferences> | null): FinancePreferences {
@@ -35,6 +37,10 @@ function mergePreferences(partial?: Partial<FinancePreferences> | null): Finance
       partial.forecastLowBalanceThreshold >= 0
         ? partial.forecastLowBalanceThreshold
         : DEFAULT_PREFERENCES.forecastLowBalanceThreshold,
+    envelopeBudgeting:
+      typeof partial?.envelopeBudgeting === 'boolean'
+        ? partial.envelopeBudgeting
+        : DEFAULT_PREFERENCES.envelopeBudgeting,
   };
 }
 
@@ -54,8 +60,17 @@ function cloneImports(imports: ImportRecord[]): ImportRecord[] {
   return imports.map((record) => ({ ...record }));
 }
 
+function normalizeBudget(budget: Budget): Budget {
+  return {
+    ...budget,
+    rollover: typeof budget.rollover === 'boolean' ? budget.rollover : true,
+    carry:
+      typeof budget.carry === 'number' && Number.isFinite(budget.carry) ? Number(budget.carry.toFixed(2)) : undefined,
+  };
+}
+
 function cloneBudgets(budgets: Budget[]): Budget[] {
-  return budgets.map((b) => ({ ...b }));
+  return budgets.map((b) => normalizeBudget(b));
 }
 
 function cloneGoals(goals: FinancialGoal[]): FinancialGoal[] {
@@ -820,6 +835,7 @@ export function setBudget(state: FinanceState, category: string, limit: number):
     category,
     monthlyLimit: limit,
     createdAt: new Date().toISOString(),
+    rollover: true,
   };
 
   return {
@@ -847,8 +863,26 @@ export function getBudgetStatus(
     spentByCategory[item.category] = item.total;
   }
 
+  const useEnvelope = state.preferences.envelopeBudgeting === true;
+  const envelopes = useEnvelope ? getBudgetEnvelopes(state, year, month) : null;
+  const envById = envelopes ? Object.fromEntries(envelopes.map((e) => [e.budgetId, e])) : null;
+
   return state.budgets.map((budget) => {
     const spent = spentByCategory[budget.category] ?? 0;
+    const env = envById?.[budget.id];
+
+    if (env) {
+      const denom = env.assigned + Math.max(0, env.carriedIn);
+      const pct = denom > 0 ? spent / denom : spent > 0 ? 1 : 0;
+      return {
+        category: budget.category,
+        limit: budget.monthlyLimit,
+        spent: Number(spent.toFixed(2)),
+        pct: Number(pct.toFixed(4)),
+        status: env.available < 0 ? 'over' : pct >= 0.7 ? 'warning' : 'ok',
+      };
+    }
+
     const pct = budget.monthlyLimit > 0 ? spent / budget.monthlyLimit : 0;
 
     return {
@@ -859,6 +893,161 @@ export function getBudgetStatus(
       status: pct >= 1 ? 'over' : pct >= 0.7 ? 'warning' : 'ok',
     };
   });
+}
+
+function parseBudgetStartMonthKey(createdAt: string): { year: number; month: number; key: string } {
+  const d = new Date(createdAt);
+  if (Number.isNaN(d.getTime())) {
+    return { year: 1970, month: 1, key: '1970-01' };
+  }
+  const year = d.getFullYear();
+  const month = d.getMonth() + 1;
+  return { year, month, key: `${year}-${`${month}`.padStart(2, '0')}` };
+}
+
+function addCalendarMonth(year: number, month: number, delta: number): { year: number; month: number } {
+  const idx = year * 12 + (month - 1) + delta;
+  return { year: Math.floor(idx / 12), month: (idx % 12) + 1 };
+}
+
+function monthKeyFromParts(year: number, month: number): string {
+  return `${year}-${`${month}`.padStart(2, '0')}`;
+}
+
+function categorySpendAbs(
+  transactions: FinanceTransaction[],
+  year: number,
+  month: number,
+  category: string,
+): number {
+  const monthKey = monthKeyFromParts(year, month);
+  return Number(
+    transactions
+      .filter(
+        (tx) =>
+          tx.date.startsWith(monthKey) && tx.amount < 0 && tx.category !== 'Transfer' && tx.category === category,
+      )
+      .reduce((sum, tx) => sum + Math.abs(tx.amount), 0)
+      .toFixed(2),
+  );
+}
+
+function compareMonth(yearA: number, monthA: number, yearB: number, monthB: number): number {
+  const a = yearA * 12 + monthA;
+  const b = yearB * 12 + monthB;
+  return a - b;
+}
+
+/**
+ * Envelope balances for each budget in `year`/`month`.
+ * Walks from the budget’s first calendar month through M−1 to compute carry-in; then applies this month’s spend.
+ */
+export function getBudgetEnvelopes(state: FinanceState, year: number, month: number): BudgetEnvelope[] {
+  return state.budgets.map((budget) => {
+    const start = parseBudgetStartMonthKey(budget.createdAt);
+    const viewKey = monthKeyFromParts(year, month);
+
+    if (viewKey < start.key) {
+      const spent = categorySpendAbs(state.transactions, year, month, budget.category);
+      return {
+        budgetId: budget.id,
+        category: budget.category,
+        assigned: 0,
+        carriedIn: 0,
+        spent,
+        available: Number((-spent).toFixed(2)),
+        status: spent > 0 ? 'over' : 'ok',
+      };
+    }
+
+    const seedCarry =
+      typeof budget.carry === 'number' && Number.isFinite(budget.carry) ? Number(budget.carry.toFixed(2)) : 0;
+    /** Running envelope balance at end of each fully closed month in the walk. */
+    let running = seedCarry;
+    let y = start.year;
+    let m = start.month;
+
+    while (compareMonth(y, m, year, month) < 0) {
+      const assignedPrior = budget.monthlyLimit;
+      const spentPrior = categorySpendAbs(state.transactions, y, m, budget.category);
+      const endPrior = running + assignedPrior - spentPrior;
+      const rolloverOn = budget.rollover !== false;
+      if (rolloverOn) {
+        running = endPrior;
+      } else {
+        running = endPrior < 0 ? endPrior : 0;
+      }
+      const next = addCalendarMonth(y, m, 1);
+      y = next.year;
+      m = next.month;
+    }
+
+    const assigned = budget.monthlyLimit;
+    const carriedIn = Number(running.toFixed(2));
+    const spent = categorySpendAbs(state.transactions, year, month, budget.category);
+    const available = Number((carriedIn + assigned - spent).toFixed(2));
+    const denom = assigned + Math.max(0, carriedIn);
+    const pct = denom > 0 ? spent / denom : spent > 0 ? 1 : 0;
+    const status: BudgetEnvelope['status'] =
+      available < 0 ? 'over' : pct >= 0.7 ? 'warning' : 'ok';
+
+    return {
+      budgetId: budget.id,
+      category: budget.category,
+      assigned,
+      carriedIn,
+      spent,
+      available,
+      status,
+    };
+  });
+}
+
+/** Income this month minus sum of monthly limits (envelope “To be budgeted” style). */
+export function getReadyToAssign(state: FinanceState, year: number, month: number): number {
+  const monthKey = monthKeyFromParts(year, month);
+  const income = state.transactions
+    .filter((tx) => tx.date.startsWith(monthKey) && tx.amount > 0)
+    .reduce((s, tx) => s + tx.amount, 0);
+  const assigned = state.budgets.reduce((s, b) => s + b.monthlyLimit, 0);
+  return Number((income - assigned).toFixed(2));
+}
+
+export function setEnvelopeBudgetingMode(state: FinanceState, enabled: boolean): FinanceState {
+  return {
+    ...state,
+    preferences: { ...state.preferences, envelopeBudgeting: enabled },
+  };
+}
+
+export function updateBudgetEnvelope(
+  state: FinanceState,
+  budgetId: string,
+  patch: Partial<Pick<Budget, 'monthlyLimit' | 'rollover' | 'carry'>>,
+): FinanceState {
+  return {
+    ...state,
+    budgets: state.budgets.map((b) => {
+      if (b.id !== budgetId) return b;
+      let next: Budget = { ...b };
+      if (patch.monthlyLimit !== undefined) {
+        next.monthlyLimit =
+          typeof patch.monthlyLimit === 'number' && Number.isFinite(patch.monthlyLimit) && patch.monthlyLimit >= 0
+            ? Number(patch.monthlyLimit.toFixed(2))
+            : b.monthlyLimit;
+      }
+      if ('carry' in patch) {
+        next.carry =
+          typeof patch.carry === 'number' && Number.isFinite(patch.carry)
+            ? Number(patch.carry.toFixed(2))
+            : undefined;
+      }
+      if (patch.rollover !== undefined) {
+        next.rollover = patch.rollover;
+      }
+      return normalizeBudget(next);
+    }),
+  };
 }
 
 // ─── Financial Goals ──────────────────────────────────────────────────────────
