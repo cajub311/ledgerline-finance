@@ -2,6 +2,7 @@ import seedData from '../data/financeSeed.json';
 import { CATEGORY_ICONS, CATEGORY_OPTIONS, cycleCategory, normalizeCategory } from './categories';
 import type {
   Budget,
+  BudgetEnvelope,
   BudgetStatus,
   CashFlowProjection,
   CashFlowProjectionPoint,
@@ -25,6 +26,7 @@ import type {
 
 const DEFAULT_PREFERENCES: FinancePreferences = {
   forecastLowBalanceThreshold: 500,
+  budgetEnvelopeMode: false,
 };
 
 function mergePreferences(partial?: Partial<FinancePreferences> | null): FinancePreferences {
@@ -35,6 +37,10 @@ function mergePreferences(partial?: Partial<FinancePreferences> | null): Finance
       partial.forecastLowBalanceThreshold >= 0
         ? partial.forecastLowBalanceThreshold
         : DEFAULT_PREFERENCES.forecastLowBalanceThreshold,
+    budgetEnvelopeMode:
+      typeof partial?.budgetEnvelopeMode === 'boolean'
+        ? partial.budgetEnvelopeMode
+        : DEFAULT_PREFERENCES.budgetEnvelopeMode,
   };
 }
 
@@ -56,6 +62,16 @@ function cloneImports(imports: ImportRecord[]): ImportRecord[] {
 
 function cloneBudgets(budgets: Budget[]): Budget[] {
   return budgets.map((b) => ({ ...b }));
+}
+
+/** Defaults for older snapshots / seed rows missing envelope fields */
+export function normalizeBudget(budget: Budget): Budget {
+  return {
+    ...budget,
+    rollover: budget.rollover === false ? false : true,
+    carry:
+      typeof budget.carry === 'number' && Number.isFinite(budget.carry) ? budget.carry : undefined,
+  };
 }
 
 function cloneGoals(goals: FinancialGoal[]): FinancialGoal[] {
@@ -101,7 +117,7 @@ export function createFinanceState(): FinanceState {
     normalizeTransaction,
   );
   const imports = cloneImports(seedData.imports as ImportRecord[]);
-  const budgets = cloneBudgets((seedData as { budgets?: Budget[] }).budgets ?? []);
+  const budgets = cloneBudgets((seedData as { budgets?: Budget[] }).budgets ?? []).map(normalizeBudget);
   const goals = cloneGoals((seedData as { goals?: FinancialGoal[] }).goals ?? []);
 
   return {
@@ -135,7 +151,7 @@ export function rehydrateFinanceState(snapshot: Partial<FinanceState> | null | u
       snapshot.transactions?.length ? (snapshot.transactions as FinanceTransaction[]) : seed.transactions,
     ).map(normalizeTransaction),
     imports: cloneImports(snapshot.imports?.length ? (snapshot.imports as ImportRecord[]) : seed.imports),
-    budgets: cloneBudgets(snapshot.budgets ?? seed.budgets),
+    budgets: cloneBudgets(snapshot.budgets ?? seed.budgets).map(normalizeBudget),
     goals: cloneGoals(snapshot.goals ?? seed.goals),
     preferences: mergePreferences(snapshot.preferences ?? seed.preferences),
   };
@@ -801,7 +817,154 @@ export function setForecastLowBalanceThreshold(state: FinanceState, threshold: n
   };
 }
 
-// ─── Budget management ────────────────────────────────────────────────────────
+export function setBudgetEnvelopeMode(state: FinanceState, enabled: boolean): FinanceState {
+  return {
+    ...state,
+    preferences: { ...state.preferences, budgetEnvelopeMode: enabled },
+  };
+}
+
+function monthIndex(year: number, month: number): number {
+  return year * 12 + (month - 1);
+}
+
+function parseBudgetCreatedMonth(budget: Budget): { year: number; month: number } {
+  const d = new Date(budget.createdAt);
+  const year = d.getFullYear();
+  const month = d.getMonth() + 1;
+  if (!Number.isFinite(year) || month < 1 || month > 12) {
+    return { year: 1970, month: 1 };
+  }
+  return { year, month };
+}
+
+function spendInCategoryMonth(
+  transactions: FinanceTransaction[],
+  year: number,
+  month: number,
+  category: string,
+): number {
+  const monthKey = `${year}-${`${month}`.padStart(2, '0')}`;
+  return Number(
+    transactions
+      .filter(
+        (tx) => tx.date.startsWith(monthKey) && tx.amount < 0 && tx.category === category && category !== 'Transfer',
+      )
+      .reduce((sum, tx) => sum + Math.abs(tx.amount), 0)
+      .toFixed(2),
+  );
+}
+
+function monthIncomeTotal(transactions: FinanceTransaction[], year: number, month: number): number {
+  const monthKey = `${year}-${`${month}`.padStart(2, '0')}`;
+  return Number(
+    transactions
+      .filter((tx) => tx.date.startsWith(monthKey) && tx.amount > 0)
+      .reduce((sum, tx) => sum + tx.amount, 0)
+      .toFixed(2),
+  );
+}
+
+/** Income assigned to envelopes this month (sum of monthly limits for budgets active this month). */
+export function getEnvelopeAssignedTotal(state: FinanceState, year: number, month: number): number {
+  let total = 0;
+  for (const b of state.budgets) {
+    const { year: cy, month: cm } = parseBudgetCreatedMonth(b);
+    if (monthIndex(year, month) < monthIndex(cy, cm)) continue;
+    if (b.monthlyLimit > 0) total += b.monthlyLimit;
+  }
+  return Number(total.toFixed(2));
+}
+
+/** YNAB-style pool: this month’s inflows minus envelope assignments (can be negative if over-assigned). */
+export function getReadyToAssign(state: FinanceState, year: number, month: number): number {
+  const income = monthIncomeTotal(state.transactions, year, month);
+  const assigned = getEnvelopeAssignedTotal(state, year, month);
+  return Number((income - assigned).toFixed(2));
+}
+
+/**
+ * Per-budget envelope for `year`/`month`: assigned limit, carry-in from prior months,
+ * spent in category, and available (carry-in + assigned − spent).
+ */
+export function getBudgetEnvelopes(
+  state: FinanceState,
+  year: number,
+  month: number,
+): Record<string, BudgetEnvelope> {
+  const result: Record<string, BudgetEnvelope> = {};
+  const targetIdx = monthIndex(year, month);
+
+  for (const budget of state.budgets.map(normalizeBudget)) {
+    const { year: startY, month: startM } = parseBudgetCreatedMonth(budget);
+    const startIdx = monthIndex(startY, startM);
+    const assigned = Number(budget.monthlyLimit.toFixed(2));
+
+    if (targetIdx < startIdx) {
+      result[budget.id] = {
+        budgetId: budget.id,
+        category: budget.category,
+        assigned: 0,
+        carriedIn: 0,
+        spent: spendInCategoryMonth(state.transactions, year, month, budget.category),
+        available: 0,
+        status: 'ok',
+      };
+      continue;
+    }
+
+    let envelope = typeof budget.carry === 'number' && Number.isFinite(budget.carry) ? budget.carry : 0;
+    envelope = Number(envelope.toFixed(2));
+
+    for (let idx = startIdx; idx < targetIdx; idx += 1) {
+      const y = Math.floor(idx / 12);
+      const m = (idx % 12) + 1;
+      const spent = spendInCategoryMonth(state.transactions, y, m, budget.category);
+      const limit = assigned;
+      const balanceBefore = envelope + limit;
+      const end = balanceBefore - spent;
+      if (budget.rollover) {
+        envelope = end;
+      } else {
+        envelope = end < 0 ? end : 0;
+      }
+      envelope = Number(envelope.toFixed(2));
+    }
+
+    const spentM = spendInCategoryMonth(state.transactions, year, month, budget.category);
+    const carriedIn = envelope;
+    const available = Number((carriedIn + assigned - spentM).toFixed(2));
+    const denom = Math.abs(carriedIn + assigned) > 1e-9 ? Math.abs(carriedIn + assigned) : assigned || 1;
+    const pct = denom > 0 ? spentM / denom : 0;
+    const status: BudgetEnvelope['status'] =
+      available < 0 ? 'over' : pct >= 0.7 ? 'warning' : 'ok';
+
+    result[budget.id] = {
+      budgetId: budget.id,
+      category: budget.category,
+      assigned,
+      carriedIn: Number(carriedIn.toFixed(2)),
+      spent: spentM,
+      available,
+      status,
+    };
+  }
+
+  return result;
+}
+
+export function patchBudget(
+  state: FinanceState,
+  budgetId: string,
+  patch: Partial<Pick<Budget, 'monthlyLimit' | 'rollover' | 'carry'>>,
+): FinanceState {
+  return {
+    ...state,
+    budgets: state.budgets.map((b) =>
+      b.id === budgetId ? normalizeBudget({ ...b, ...patch, id: b.id, category: b.category, createdAt: b.createdAt }) : b,
+    ),
+  };
+}
 
 export function setBudget(state: FinanceState, category: string, limit: number): FinanceState {
   const existing = state.budgets.find((b) => b.category === category);
@@ -810,17 +973,18 @@ export function setBudget(state: FinanceState, category: string, limit: number):
     return {
       ...state,
       budgets: state.budgets.map((b) =>
-        b.category === category ? { ...b, monthlyLimit: limit } : b,
+        b.category === category ? normalizeBudget({ ...b, monthlyLimit: limit }) : b,
       ),
     };
   }
 
-  const newBudget: Budget = {
+  const newBudget: Budget = normalizeBudget({
     id: createId('bgt'),
     category,
     monthlyLimit: limit,
     createdAt: new Date().toISOString(),
-  };
+    rollover: true,
+  });
 
   return {
     ...state,
