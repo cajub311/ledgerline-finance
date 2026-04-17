@@ -20,8 +20,9 @@ import {
   getSafeToSpend,
   getSavingsRate,
   getTopMerchants,
+  projectRecurring,
 } from '../finance/ledger';
-import type { FinanceState } from '../finance/types';
+import type { FinanceState, ProjectedRecurringItem } from '../finance/types';
 import { useTheme } from '../theme/ThemeContext';
 import { radius, spacing, typography } from '../theme/tokens';
 import { formatCurrency } from '../utils/format';
@@ -67,6 +68,45 @@ export function DashboardPage({ state }: DashboardPageProps) {
   const subsMonthly = subs.filter((s) => s.frequency === 'monthly').reduce((s, c) => s + c.amount, 0);
   const safeToSpend = useMemo(() => getSafeToSpend(state), [state]);
   const health = useMemo(() => getFinancialHealthScore(state), [state]);
+  const upcoming30 = useMemo(() => projectRecurring(state, 30), [state]);
+
+  const upcomingByWeek = useMemo(() => {
+    const mondayKey = (iso: string): string => {
+      const [y, mo, d] = iso.split('-').map(Number) as [number, number, number];
+      const dt = new Date(y, mo - 1, d);
+      const dow = dt.getDay();
+      const diff = dow === 0 ? -6 : 1 - dow;
+      dt.setDate(dt.getDate() + diff);
+      return `${dt.getFullYear()}-${`${dt.getMonth() + 1}`.padStart(2, '0')}-${`${dt.getDate()}`.padStart(2, '0')}`;
+    };
+    const map = new Map<
+      string,
+      { label: string; items: ProjectedRecurringItem[]; outflow: number; inflow: number }
+    >();
+    for (const item of upcoming30) {
+      const wk = mondayKey(item.date);
+      let bucket = map.get(wk);
+      if (!bucket) {
+        const [yy, mm, dd] = wk.split('-').map(Number);
+        const start = new Date(yy, mm - 1, dd);
+        const end = new Date(start);
+        end.setDate(end.getDate() + 6);
+        const label = `${start.toLocaleString('default', { month: 'short', day: 'numeric' })} – ${end.toLocaleString('default', { month: 'short', day: 'numeric' })}`;
+        bucket = { label, items: [], outflow: 0, inflow: 0 };
+        map.set(wk, bucket);
+      }
+      bucket.items.push(item);
+      if (item.kind === 'charge') bucket.outflow += Math.abs(item.amount);
+      else bucket.inflow += item.amount;
+    }
+    return [...map.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([, v]) => ({
+        ...v,
+        outflow: Number(v.outflow.toFixed(2)),
+        inflow: Number(v.inflow.toFixed(2)),
+      }));
+  }, [upcoming30]);
 
   return (
     <View style={{ gap: spacing.lg }}>
@@ -128,6 +168,64 @@ export function DashboardPage({ state }: DashboardPageProps) {
           footer={savingsRate >= 20 ? 'Healthy' : savingsRate > 0 ? 'Keep building' : 'No savings this month'}
         />
       </View>
+
+      <Card title="Upcoming in the next 30 days" eyebrow="Detected recurring bills & paychecks">
+        {upcoming30.length === 0 ? (
+          <Text style={{ color: palette.textSubtle, fontSize: typography.small }}>
+            No recurring patterns yet — add at least two similar-dated charges or deposits with the same payee to see
+            projections.
+          </Text>
+        ) : (
+          <View style={{ gap: spacing.lg }}>
+            {upcomingByWeek.map((week) => (
+              <View key={week.label} style={{ gap: spacing.sm }}>
+                <View style={styles.rowBetween}>
+                  <Text style={[styles.weekTitle, { color: palette.text }]}>{week.label}</Text>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={[styles.weekTotals, { color: palette.danger }]}>
+                      Out {formatCurrency(week.outflow)}
+                    </Text>
+                    <Text style={[styles.weekTotals, { color: palette.success }]}>
+                      In {formatCurrency(week.inflow)}
+                    </Text>
+                  </View>
+                </View>
+                <View style={{ gap: spacing.xs }}>
+                  {week.items
+                    .slice()
+                    .sort((a, b) => a.date.localeCompare(b.date) || a.payee.localeCompare(b.payee))
+                    .map((item) => (
+                      <View
+                        key={`${item.date}-${item.kind}-${item.payee}-${item.amount}`}
+                        style={[
+                          styles.upcomingRow,
+                          { backgroundColor: palette.surfaceSunken, borderColor: palette.borderSoft },
+                        ]}
+                      >
+                        <Text style={[styles.upcomingDate, { color: palette.textMuted }]}>{item.date.slice(5)}</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[styles.upcomingPayee, { color: palette.text }]}>{item.payee}</Text>
+                          <Text style={[styles.upcomingMeta, { color: palette.textSubtle }]}>
+                            {item.frequency} · {(item.confidence * 100).toFixed(0)}% confidence
+                          </Text>
+                        </View>
+                        <Text
+                          style={[
+                            styles.upcomingAmt,
+                            { color: item.kind === 'income' ? palette.success : palette.text },
+                          ]}
+                        >
+                          {item.kind === 'income' ? '+' : ''}
+                          {formatCurrency(item.amount)}
+                        </Text>
+                      </View>
+                    ))}
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+      </Card>
 
       <View style={styles.twoCol}>
         <Card title="Income vs spend" eyebrow="Last 6 months" style={styles.flex2}>
@@ -371,6 +469,21 @@ const styles = StyleSheet.create({
   mCount: { fontSize: typography.micro, marginTop: 2 },
   mAmt: { fontSize: typography.body, fontWeight: '700' },
   subsTotal: { fontSize: typography.title, fontWeight: '800' },
+  weekTitle: { fontSize: typography.subtitle, fontWeight: '700' },
+  weekTotals: { fontSize: typography.small, fontWeight: '600' },
+  upcomingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+  },
+  upcomingDate: { fontSize: typography.small, fontWeight: '700', width: 44 },
+  upcomingPayee: { fontSize: typography.body, fontWeight: '600' },
+  upcomingMeta: { fontSize: typography.micro, marginTop: 2 },
+  upcomingAmt: { fontSize: typography.body, fontWeight: '700' },
   insight: {
     borderRadius: radius.md,
     borderWidth: 1,
