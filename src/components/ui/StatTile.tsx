@@ -1,7 +1,7 @@
 import { StyleSheet, Text, View, type ViewStyle } from 'react-native';
 
 import { useTheme } from '../../theme/ThemeContext';
-import { radius, spacing, typography } from '../../theme/tokens';
+import { elevation, radius, spacing, typography } from '../../theme/tokens';
 
 export type StatTone = 'neutral' | 'positive' | 'warning' | 'danger' | 'primary';
 
@@ -15,7 +15,7 @@ interface StatTileProps {
 }
 
 export function StatTile({ label, value, delta, tone = 'neutral', footer, style }: StatTileProps) {
-  const { palette } = useTheme();
+  const { palette, mode } = useTheme();
   const toneColor =
     tone === 'positive'
       ? palette.success
@@ -32,6 +32,7 @@ export function StatTile({ label, value, delta, tone = 'neutral', footer, style 
       style={[
         styles.tile,
         { backgroundColor: palette.surface, borderColor: palette.borderSoft },
+        elevation(1, mode),
         style,
       ]}
     >

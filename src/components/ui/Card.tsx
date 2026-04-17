@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { StyleSheet, Text, View, type ViewStyle } from 'react-native';
 
 import { useTheme } from '../../theme/ThemeContext';
-import { radius, spacing, typography } from '../../theme/tokens';
+import { elevation, radius, spacing, typography } from '../../theme/tokens';
 
 interface CardProps {
   title?: string;
@@ -11,10 +11,20 @@ interface CardProps {
   children: ReactNode;
   padding?: number;
   style?: ViewStyle;
+  /** Visual elevation 0..2 (0 = flat with border only). Defaults to 1. */
+  elevation?: 0 | 1 | 2;
 }
 
-export function Card({ title, eyebrow, action, children, padding = spacing.xl, style }: CardProps) {
-  const { palette } = useTheme();
+export function Card({
+  title,
+  eyebrow,
+  action,
+  children,
+  padding = spacing.xl,
+  style,
+  elevation: level = 1,
+}: CardProps) {
+  const { palette, mode } = useTheme();
   return (
     <View
       style={[
@@ -24,6 +34,7 @@ export function Card({ title, eyebrow, action, children, padding = spacing.xl, s
           borderColor: palette.borderSoft,
           padding,
         },
+        level === 0 ? undefined : elevation(level === 1 ? 1 : 2, mode),
         style,
       ]}
     >

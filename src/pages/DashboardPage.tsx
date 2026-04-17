@@ -23,7 +23,7 @@ import {
 } from '../finance/ledger';
 import type { FinanceState } from '../finance/types';
 import { useTheme } from '../theme/ThemeContext';
-import { radius, spacing, typography } from '../theme/tokens';
+import { elevation, radius, spacing, typography } from '../theme/tokens';
 import { formatCurrency } from '../utils/format';
 
 interface DashboardPageProps {
@@ -31,7 +31,7 @@ interface DashboardPageProps {
 }
 
 export function DashboardPage({ state }: DashboardPageProps) {
-  const { palette } = useTheme();
+  const { palette, mode } = useTheme();
   const summary = useMemo(() => getFinanceSummary(state), [state]);
   const savingsRate = useMemo(() => getSavingsRate(state), [state]);
   const trend = useMemo(() => getMonthlyTrend(state.transactions, 6), [state.transactions]);
@@ -68,64 +68,115 @@ export function DashboardPage({ state }: DashboardPageProps) {
   const safeToSpend = useMemo(() => getSafeToSpend(state), [state]);
   const health = useMemo(() => getFinancialHealthScore(state), [state]);
 
+  const healthColor =
+    health.score >= 85
+      ? palette.success
+      : health.score >= 70
+        ? palette.success
+        : health.score >= 50
+          ? palette.warning
+          : palette.danger;
+
   return (
     <View style={{ gap: spacing.lg }}>
-      <View>
-        <Text style={[styles.eyebrow, { color: palette.textSubtle }]}>{monthLabel}</Text>
-        <Text style={[styles.headline, { color: palette.text }]}>Good to see you.</Text>
-        <Text style={[styles.subhead, { color: palette.textMuted }]}>
-          {summary.unreviewedCount > 0
-            ? `${summary.unreviewedCount} transaction${summary.unreviewedCount === 1 ? '' : 's'} to review this month.`
-            : 'All transactions reviewed. Nice work.'}
-        </Text>
+      <View
+        style={[
+          styles.hero,
+          elevation(3, mode),
+          {
+            borderColor: palette.borderSoft,
+            // @ts-expect-error web-only linear-gradient via style prop
+            backgroundImage: `linear-gradient(135deg, ${palette.heroGradientStart}, ${palette.heroGradientEnd})`,
+            backgroundColor: palette.primary,
+          },
+        ]}
+      >
+        <View style={styles.heroTopRow}>
+          <View style={{ flex: 1, minWidth: 220 }}>
+            <Text style={styles.heroEyebrow}>{monthLabel}</Text>
+            <Text style={styles.heroHeadline}>Good to see you.</Text>
+            <Text style={styles.heroSubhead}>
+              {summary.unreviewedCount > 0
+                ? `${summary.unreviewedCount} transaction${summary.unreviewedCount === 1 ? '' : 's'} to review this month.`
+                : 'All caught up — nice work.'}
+            </Text>
+          </View>
+          <View style={styles.heroHealthChip}>
+            <Text style={styles.heroHealthValue}>{health.score}</Text>
+            <Text style={styles.heroHealthLabel}>{health.label}</Text>
+          </View>
+        </View>
+
+        <View style={styles.heroSplitRow}>
+          <View style={styles.heroSplitItem}>
+            <Text style={styles.heroSplitLabel}>Safe to spend</Text>
+            <Text style={styles.heroSplitValue}>{formatCurrency(safeToSpend)}</Text>
+            <Text style={styles.heroSplitMeta}>
+              Rest of {monthName} at your current pace
+            </Text>
+          </View>
+          <View style={styles.heroSplitDivider} />
+          <View style={styles.heroSplitItem}>
+            <Text style={styles.heroSplitLabel}>This month net</Text>
+            <Text
+              style={[
+                styles.heroSplitValue,
+                net < 0 ? { color: '#ffd4d4' } : undefined,
+              ]}
+            >
+              {formatCurrency(net)}
+            </Text>
+            <Text style={styles.heroSplitMeta}>
+              {formatCurrency(summary.monthIncome)} in · {formatCurrency(summary.monthSpend)} out
+            </Text>
+          </View>
+          <View style={styles.heroSplitDivider} />
+          <View style={styles.heroSplitItem}>
+            <Text style={styles.heroSplitLabel}>Savings rate</Text>
+            <Text style={styles.heroSplitValue}>{savingsRate}%</Text>
+            <Text style={styles.heroSplitMeta}>
+              {savingsRate >= 20 ? 'Healthy' : savingsRate > 0 ? 'Keep building' : 'Starting point'}
+            </Text>
+          </View>
+        </View>
       </View>
 
       <View
         style={[
           styles.privacyRibbon,
-          { backgroundColor: palette.primarySoft, borderColor: palette.primary },
+          { backgroundColor: palette.surface, borderColor: palette.borderSoft },
         ]}
       >
-        <Text style={[styles.privacyTitle, { color: palette.primary }]}>
-          Your data never leaves your device. No accounts. No servers. No subscriptions.
-        </Text>
-        <Text style={[styles.privacyBody, { color: palette.textMuted }]}>
-          Ledgerline runs in your browser; your ledger is stored locally. See Settings → Privacy & security for
-          details.
-        </Text>
-      </View>
-
-      <View style={styles.heroRow}>
-        <Card title="Safe to spend" eyebrow="Liquid cash minus pace-adjusted rest-of-month spend" style={styles.heroMain}>
-          <Text style={[styles.heroAmount, { color: palette.text }]}>{formatCurrency(safeToSpend)}</Text>
-          <Text style={{ color: palette.textSubtle, fontSize: typography.small, marginTop: 6, lineHeight: 19 }}>
-            Conservative buffer after projecting spending for the rest of {monthName} from your pace so far. Not
-            financial advice.
+        <Text style={{ fontSize: 16 }}>🔒</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.privacyTitle, { color: palette.text }]}>
+            Your data never leaves this device.
           </Text>
-        </Card>
-        <Card title="Financial health" eyebrow="Composite score" style={styles.heroSide}>
-          <Text style={[styles.healthScore, { color: palette.primary }]}>{health.score}</Text>
-          <Text style={{ color: palette.textMuted, fontWeight: '700', marginTop: 4 }}>{health.label}</Text>
-          <Text style={{ color: palette.textSubtle, fontSize: typography.micro, marginTop: 8, lineHeight: 16 }}>
-            Based on budgets, savings rate, categorization, and review status.
+          <Text style={[styles.privacyBody, { color: palette.textSubtle }]}>
+            No accounts. No servers. No subscriptions. Export a JSON or PDF backup from the Import
+            tab any time.
           </Text>
-        </Card>
+        </View>
       </View>
 
       <View style={styles.statsGrid}>
         <StatTile label="Net worth" value={formatCurrency(summary.netWorth)} tone="primary" />
-        <StatTile label="Liquid cash" value={formatCurrency(summary.liquidCash)} />
         <StatTile
-          label="This month net"
-          value={formatCurrency(net)}
-          tone={net >= 0 ? 'positive' : 'danger'}
-          footer={`${formatCurrency(summary.monthIncome)} in · ${formatCurrency(summary.monthSpend)} out`}
+          label="Liquid cash"
+          value={formatCurrency(summary.liquidCash)}
+          footer={`${state.accounts.length} account${state.accounts.length === 1 ? '' : 's'}`}
         />
         <StatTile
-          label="Savings rate"
-          value={`${savingsRate}%`}
-          tone={savingsRate >= 15 ? 'positive' : savingsRate > 0 ? 'warning' : 'danger'}
-          footer={savingsRate >= 20 ? 'Healthy' : savingsRate > 0 ? 'Keep building' : 'No savings this month'}
+          label="Unreviewed"
+          value={`${summary.unreviewedCount}`}
+          tone={summary.unreviewedCount === 0 ? 'positive' : 'warning'}
+          footer={`${state.transactions.length} total transactions`}
+        />
+        <StatTile
+          label="Over budget"
+          value={`${overBudget}`}
+          tone={overBudget === 0 ? 'positive' : 'danger'}
+          footer={budgetStatuses.length ? `${budgetStatuses.length} budgets tracked` : 'Set a budget to track'}
         />
       </View>
 
@@ -280,26 +331,103 @@ export function DashboardPage({ state }: DashboardPageProps) {
 }
 
 const styles = StyleSheet.create({
-  eyebrow: {
-    fontSize: typography.micro,
-    textTransform: 'uppercase',
-    letterSpacing: 1.2,
-    fontWeight: '700',
+  hero: {
+    padding: spacing.xxl,
+    borderRadius: radius.xl,
+    gap: spacing.xl,
+    borderWidth: 1,
+    overflow: 'hidden',
   },
-  headline: {
+  heroTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.lg,
+    flexWrap: 'wrap',
+  },
+  heroEyebrow: {
+    color: 'rgba(255,255,255,0.78)',
+    fontSize: typography.micro,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+  },
+  heroHeadline: {
+    color: '#ffffff',
     fontSize: typography.displayLg,
     fontWeight: '800',
+    letterSpacing: -0.6,
     marginTop: 4,
   },
-  subhead: {
+  heroSubhead: {
+    color: 'rgba(255,255,255,0.86)',
     fontSize: typography.body,
+    marginTop: 6,
+  },
+  heroHealthChip: {
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderRadius: radius.lg,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    minWidth: 110,
+    alignItems: 'center',
+  },
+  heroHealthValue: {
+    color: '#ffffff',
+    fontSize: 36,
+    fontWeight: '800',
+    lineHeight: 38,
+  },
+  heroHealthLabel: {
+    color: 'rgba(255,255,255,0.86)',
+    fontSize: typography.micro,
+    fontWeight: '800',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginTop: 2,
+  },
+  heroSplitRow: {
+    flexDirection: 'row',
+    gap: spacing.lg,
+    flexWrap: 'wrap',
+    marginTop: spacing.md,
+  },
+  heroSplitItem: {
+    flex: 1,
+    minWidth: 160,
+  },
+  heroSplitLabel: {
+    color: 'rgba(255,255,255,0.82)',
+    fontSize: typography.micro,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
+  heroSplitValue: {
+    color: '#ffffff',
+    fontSize: 28,
+    fontWeight: '800',
+    letterSpacing: -0.4,
     marginTop: 4,
+  },
+  heroSplitMeta: {
+    color: 'rgba(255,255,255,0.78)',
+    fontSize: typography.micro,
+    marginTop: 4,
+    lineHeight: 16,
+  },
+  heroSplitDivider: {
+    width: 1,
+    alignSelf: 'stretch',
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    marginHorizontal: spacing.xs,
   },
   privacyRibbon: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    alignItems: 'flex-start',
     borderRadius: radius.md,
     borderWidth: 1,
     padding: spacing.md,
-    gap: 4,
   },
   privacyTitle: {
     fontSize: typography.small,
@@ -309,29 +437,7 @@ const styles = StyleSheet.create({
   privacyBody: {
     fontSize: typography.micro,
     lineHeight: 17,
-  },
-  heroRow: {
-    flexDirection: 'row',
-    gap: spacing.lg,
-    flexWrap: 'wrap',
-  },
-  heroMain: {
-    flex: 2,
-    minWidth: 280,
-  },
-  heroSide: {
-    flex: 1,
-    minWidth: 220,
-  },
-  heroAmount: {
-    fontSize: 36,
-    fontWeight: '800',
-    letterSpacing: -0.5,
-  },
-  healthScore: {
-    fontSize: 48,
-    fontWeight: '800',
-    lineHeight: 52,
+    marginTop: 2,
   },
   statsGrid: {
     flexDirection: 'row',

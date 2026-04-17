@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useTheme } from '../../theme/ThemeContext';
 import { radius, spacing, typography } from '../../theme/tokens';
@@ -8,6 +8,15 @@ export interface NavItem<T extends string> {
   label: string;
   icon: string;
   badge?: number;
+  /** Optional grouping header that appears above this item. */
+  section?: string;
+}
+
+export interface SidebarSummary {
+  netWorth: string;
+  liquidCash: string;
+  trendLabel: string;
+  trendPositive: boolean;
 }
 
 interface SidebarProps<T extends string> {
@@ -16,6 +25,7 @@ interface SidebarProps<T extends string> {
   onSelect: (value: T) => void;
   householdName: string;
   compact?: boolean;
+  summary?: SidebarSummary;
 }
 
 export function Sidebar<T extends string>({
@@ -24,6 +34,7 @@ export function Sidebar<T extends string>({
   onSelect,
   householdName,
   compact,
+  summary,
 }: SidebarProps<T>) {
   const { palette } = useTheme();
 
@@ -35,7 +46,28 @@ export function Sidebar<T extends string>({
           { backgroundColor: palette.surface, borderColor: palette.borderSoft },
         ]}
       >
-        <View style={styles.topbarItems}>
+        <View style={styles.topbarBrandRow}>
+          <View style={[styles.brandMark, { backgroundColor: palette.primary }]}>
+            <Text style={[styles.brandMarkText, { color: palette.primaryText }]}>L</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.brandName, { color: palette.text }]}>Ledgerline</Text>
+            <Text style={[styles.brandSub, { color: palette.textSubtle }]} numberOfLines={1}>
+              {householdName}
+            </Text>
+          </View>
+          {summary ? (
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={[styles.topbarNet, { color: palette.text }]}>{summary.netWorth}</Text>
+              <Text style={[styles.topbarLabel, { color: palette.textSubtle }]}>Net worth</Text>
+            </View>
+          ) : null}
+        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.topbarScroll}
+        >
           {items.map((item) => {
             const active = item.value === activeValue;
             return (
@@ -45,8 +77,9 @@ export function Sidebar<T extends string>({
                 style={({ hovered }) => [
                   styles.pill,
                   {
-                    backgroundColor: active ? palette.primary : 'transparent',
-                    opacity: hovered && !active ? 0.8 : 1,
+                    backgroundColor: active ? palette.primary : palette.surfaceSunken,
+                    borderColor: active ? palette.primary : palette.borderSoft,
+                    opacity: hovered && !active ? 0.9 : 1,
                   },
                 ]}
               >
@@ -81,10 +114,12 @@ export function Sidebar<T extends string>({
               </Pressable>
             );
           })}
-        </View>
+        </ScrollView>
       </View>
     );
   }
+
+  const grouped = groupBySection(items);
 
   return (
     <View
@@ -97,67 +132,143 @@ export function Sidebar<T extends string>({
         <View style={[styles.brandMark, { backgroundColor: palette.primary }]}>
           <Text style={[styles.brandMarkText, { color: palette.primaryText }]}>L</Text>
         </View>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={[styles.brandName, { color: palette.text }]}>Ledgerline</Text>
-          <Text style={[styles.brandSub, { color: palette.textSubtle }]}>{householdName}</Text>
+          <Text style={[styles.brandSub, { color: palette.textSubtle }]} numberOfLines={1}>
+            {householdName}
+          </Text>
         </View>
       </View>
 
-      <View style={{ gap: 4 }}>
-        {items.map((item) => {
-          const active = item.value === activeValue;
-          return (
-            <Pressable
-              key={item.value}
-              onPress={() => onSelect(item.value)}
-              style={({ hovered }) => [
-                styles.item,
+      {summary ? (
+        <View
+          style={[
+            styles.summaryCard,
+            {
+              backgroundColor: palette.surfaceSunken,
+              borderColor: palette.borderSoft,
+            },
+          ]}
+        >
+          <Text style={[styles.summaryLabel, { color: palette.textSubtle }]}>Net worth</Text>
+          <Text style={[styles.summaryValue, { color: palette.text }]}>{summary.netWorth}</Text>
+          <View style={styles.summarySplit}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.summaryMini, { color: palette.textSubtle }]}>Liquid cash</Text>
+              <Text style={[styles.summaryMiniValue, { color: palette.text }]}>
+                {summary.liquidCash}
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.trendChip,
                 {
-                  backgroundColor: active
-                    ? palette.primarySoft
-                    : hovered
-                      ? palette.surfaceSunken
-                      : 'transparent',
+                  backgroundColor: summary.trendPositive
+                    ? palette.successSoft
+                    : palette.dangerSoft,
                 },
               ]}
             >
-              <Text style={styles.icon}>{item.icon}</Text>
               <Text
-                style={[
-                  styles.label,
-                  { color: active ? palette.primary : palette.textMuted },
-                  active && { fontWeight: '800' },
-                ]}
+                style={{
+                  color: summary.trendPositive ? palette.success : palette.danger,
+                  fontWeight: '800',
+                  fontSize: typography.micro,
+                }}
               >
-                {item.label}
+                {summary.trendLabel}
               </Text>
-              {item.badge ? (
-                <View style={[styles.badgeInline, { backgroundColor: palette.primary }]}>
-                  <Text style={[styles.badgeText, { color: palette.primaryText }]}>
-                    {item.badge}
-                  </Text>
-                </View>
-              ) : null}
-            </Pressable>
-          );
-        })}
-      </View>
+            </View>
+          </View>
+        </View>
+      ) : null}
 
-      <View style={styles.footerNote}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ gap: spacing.md, paddingBottom: spacing.lg }}
+        showsVerticalScrollIndicator={false}
+      >
+        {grouped.map(({ section, items: sectionItems }) => (
+          <View key={section || 'root'} style={{ gap: 4 }}>
+            {section ? (
+              <Text style={[styles.sectionHeader, { color: palette.textSubtle }]}>
+                {section}
+              </Text>
+            ) : null}
+            {sectionItems.map((item) => {
+              const active = item.value === activeValue;
+              return (
+                <Pressable
+                  key={item.value}
+                  onPress={() => onSelect(item.value)}
+                  style={({ hovered }) => [
+                    styles.item,
+                    {
+                      backgroundColor: active
+                        ? palette.primarySoft
+                        : hovered
+                          ? palette.surfaceSunken
+                          : 'transparent',
+                    },
+                  ]}
+                >
+                  {active ? (
+                    <View style={[styles.activeRail, { backgroundColor: palette.primary }]} />
+                  ) : null}
+                  <Text style={styles.icon}>{item.icon}</Text>
+                  <Text
+                    style={[
+                      styles.label,
+                      { color: active ? palette.primary : palette.textMuted },
+                      active && { fontWeight: '800' },
+                    ]}
+                  >
+                    {item.label}
+                  </Text>
+                  {item.badge ? (
+                    <View style={[styles.badgeInline, { backgroundColor: palette.primary }]}>
+                      <Text style={[styles.badgeText, { color: palette.primaryText }]}>
+                        {item.badge}
+                      </Text>
+                    </View>
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </View>
+        ))}
+      </ScrollView>
+
+      <View style={[styles.footerNote, { borderTopColor: palette.borderSoft }]}>
         <Text style={[styles.footerTitle, { color: palette.text }]}>Local-first</Text>
         <Text style={[styles.footerText, { color: palette.textSubtle }]}>
-          Your ledger lives in this browser. Export a backup from Settings any time.
+          Your ledger lives on this device. Export a backup from Settings any time.
         </Text>
       </View>
     </View>
   );
 }
 
+function groupBySection<T extends string>(
+  items: ReadonlyArray<NavItem<T>>,
+): Array<{ section: string | undefined; items: Array<NavItem<T>> }> {
+  const out: Array<{ section: string | undefined; items: Array<NavItem<T>> }> = [];
+  for (const item of items) {
+    const last = out[out.length - 1];
+    if (last && last.section === item.section) {
+      last.items.push(item);
+    } else {
+      out.push({ section: item.section, items: [item] });
+    }
+  }
+  return out;
+}
+
 const styles = StyleSheet.create({
   shell: {
-    width: 240,
+    width: 260,
     padding: spacing.lg,
-    gap: spacing.xl,
+    gap: spacing.lg,
     borderRightWidth: 1,
   },
   brand: {
@@ -186,6 +297,55 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
+  summaryCard: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    padding: spacing.md,
+    gap: 4,
+  },
+  summaryLabel: {
+    fontSize: typography.micro,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    fontWeight: '700',
+  },
+  summaryValue: {
+    fontSize: typography.title,
+    fontWeight: '800',
+    letterSpacing: -0.3,
+    marginTop: 2,
+  },
+  summarySplit: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  summaryMini: {
+    fontSize: typography.micro,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  summaryMiniValue: {
+    fontSize: typography.body,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  trendChip: {
+    borderRadius: radius.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  sectionHeader: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    paddingHorizontal: spacing.sm,
+    marginBottom: 4,
+    marginTop: spacing.sm,
+  },
   item: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -193,6 +353,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: 10,
     borderRadius: radius.md,
+    position: 'relative',
+  },
+  activeRail: {
+    position: 'absolute',
+    left: 2,
+    top: 10,
+    bottom: 10,
+    width: 3,
+    borderRadius: 2,
   },
   icon: {
     fontSize: 18,
@@ -223,12 +392,13 @@ const styles = StyleSheet.create({
   },
   footerNote: {
     marginTop: 'auto',
-    paddingTop: spacing.lg,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
     gap: 4,
   },
   footerTitle: {
     fontSize: typography.small,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   footerText: {
     fontSize: typography.micro,
@@ -238,11 +408,26 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
+    gap: spacing.sm,
   },
-  topbarItems: {
+  topbarBrandRow: {
     flexDirection: 'row',
-    gap: 4,
-    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  topbarScroll: {
+    gap: 6,
+    paddingVertical: 2,
+  },
+  topbarNet: {
+    fontSize: typography.body,
+    fontWeight: '800',
+  },
+  topbarLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
   },
   pill: {
     flexDirection: 'row',
@@ -251,6 +436,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: radius.pill,
+    borderWidth: 1,
   },
   pillIcon: {
     fontSize: 14,

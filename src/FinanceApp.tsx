@@ -10,8 +10,13 @@ import {
   View,
 } from 'react-native';
 
-import { Sidebar, type NavItem } from './components/layout/Sidebar';
-import { createFinanceState, getFinanceSummary, rehydrateFinanceState } from './finance/ledger';
+import { Sidebar, type NavItem, type SidebarSummary } from './components/layout/Sidebar';
+import {
+  createFinanceState,
+  getFinanceSummary,
+  getMonthlyTrend,
+  rehydrateFinanceState,
+} from './finance/ledger';
 import type { FinanceState } from './finance/types';
 import { loadFinanceState } from './finance/storage';
 import { useDebouncedFinancePersistence } from './hooks/useDebouncedFinancePersistence';
@@ -25,7 +30,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { TransactionsPage } from './pages/TransactionsPage';
 import { ThemeProvider, useTheme } from './theme/ThemeContext';
 import { spacing, typography } from './theme/tokens';
-import { getErrorMessage } from './utils/format';
+import { formatCurrency, getErrorMessage } from './utils/format';
 
 type Tab =
   | 'dashboard'
@@ -38,14 +43,14 @@ type Tab =
   | 'settings';
 
 const TAB_ROUTES: ReadonlyArray<NavItem<Tab>> = [
-  { value: 'dashboard', label: 'Dashboard', icon: '🏠' },
-  { value: 'transactions', label: 'Transactions', icon: '🧾' },
-  { value: 'budgets', label: 'Budgets', icon: '🎯' },
-  { value: 'forecast', label: 'Forecast', icon: '📈' },
-  { value: 'goals', label: 'Goals', icon: '🚀' },
-  { value: 'accounts', label: 'Accounts', icon: '🏦' },
-  { value: 'import', label: 'Import', icon: '📥' },
-  { value: 'settings', label: 'Settings', icon: '⚙️' },
+  { value: 'dashboard', label: 'Dashboard', icon: '🏠', section: 'Overview' },
+  { value: 'transactions', label: 'Transactions', icon: '🧾', section: 'Overview' },
+  { value: 'accounts', label: 'Accounts', icon: '🏦', section: 'Overview' },
+  { value: 'budgets', label: 'Budgets', icon: '🎯', section: 'Plan' },
+  { value: 'goals', label: 'Goals', icon: '🚀', section: 'Plan' },
+  { value: 'forecast', label: 'Forecast', icon: '📈', section: 'Plan' },
+  { value: 'import', label: 'Import & export', icon: '📥', section: 'Data' },
+  { value: 'settings', label: 'Settings', icon: '⚙️', section: 'Data' },
 ];
 
 export default function FinanceApp() {
@@ -100,6 +105,22 @@ function AppShell() {
     });
   }, [summary.unreviewedCount]);
 
+  const sidebarSummary = useMemo<SidebarSummary>(() => {
+    const trend = getMonthlyTrend(state.transactions, 2);
+    const prev = trend[0];
+    const now = trend[1];
+    const delta =
+      prev && now ? (now.income - now.spend) - (prev.income - prev.spend) : summary.monthIncome - summary.monthSpend;
+    const trendPositive = delta >= 0;
+    const formattedDelta = formatCurrency(Math.abs(delta));
+    return {
+      netWorth: formatCurrency(summary.netWorth),
+      liquidCash: formatCurrency(summary.liquidCash),
+      trendLabel: `${trendPositive ? '▲' : '▼'} ${formattedDelta} MoM`,
+      trendPositive,
+    };
+  }, [state.transactions, summary.monthIncome, summary.monthSpend, summary.netWorth, summary.liquidCash]);
+
   if (loading) {
     return (
       <SafeAreaView style={[styles.loading, { backgroundColor: palette.bg }]}>
@@ -122,6 +143,7 @@ function AppShell() {
             activeValue={activeTab}
             onSelect={setActiveTab}
             householdName={state.householdName}
+            summary={sidebarSummary}
           />
           <PageContainer>
             {loadError ? <LoadErrorBanner message={loadError} /> : null}
@@ -135,6 +157,7 @@ function AppShell() {
             activeValue={activeTab}
             onSelect={setActiveTab}
             householdName={state.householdName}
+            summary={sidebarSummary}
             compact
           />
           <PageContainer>
