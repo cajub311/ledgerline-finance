@@ -17,7 +17,7 @@
       body {
         overflow: hidden;
         margin: 0;
-        background: #071218;
+        background: #0b1020;
       }
       /* The root element for your Expo app — must paint above the boot overlay */
       #root {
@@ -37,24 +37,29 @@
         justify-content: center;
         flex-direction: column;
         gap: 12px;
-        background: #071218;
-        color: #eff7f4;
-        font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+        background: #0b1020;
+        color: #f5f7ff;
+        font-family:
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          Segoe UI,
+          sans-serif;
         padding: 24px;
         text-align: center;
       }
       #ledgerline-boot p {
         margin: 0;
         font-size: 15px;
-        color: #b9ccd0;
+        color: #b8c0d9;
         max-width: 22rem;
         line-height: 1.45;
       }
       #ledgerline-boot .spinner {
         width: 36px;
         height: 36px;
-        border: 3px solid #27444f;
-        border-top-color: #d4e37d;
+        border: 3px solid #1f2a46;
+        border-top-color: #6d7dff;
         border-radius: 50%;
         animation: ledgerline-spin 0.85s linear infinite;
       }
@@ -73,15 +78,38 @@
       #ledgerline-boot.error pre {
         text-align: left;
         font-size: 12px;
-        color: #94bdc4;
+        color: #7d87a6;
         white-space: pre-wrap;
         word-break: break-word;
         max-width: 100%;
+      }
+      #ledgerline-boot.boot-light {
+        background: #f5f7fb;
+        color: #141829;
+      }
+      #ledgerline-boot.boot-light p {
+        color: #4d5570;
+      }
+      #ledgerline-boot.boot-light .spinner {
+        border-color: #dde3ee;
+        border-top-color: #4f5ff2;
       }
     </style>
   </head>
 
   <body>
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('ledgerline/theme-mode');
+          var mode = stored === 'light' || stored === 'dark' ? stored : 'dark';
+          document.documentElement.style.colorScheme = mode === 'light' ? 'light' : 'dark';
+          document.body.style.background = mode === 'light' ? '#f5f7fb' : '#0b1020';
+        } catch (e) {
+          document.documentElement.style.colorScheme = 'dark';
+        }
+      })();
+    </script>
     <!-- This app requires JavaScript. -->
     <noscript>
       You need to enable JavaScript to run this app.
@@ -98,7 +126,12 @@
         function showError(title, detail) {
           var el = document.getElementById('ledgerline-boot');
           if (!el) return;
-          el.className = 'error';
+          var light = false;
+          try {
+            var s = localStorage.getItem('ledgerline/theme-mode');
+            light = s === 'light';
+          } catch (e2) {}
+          el.className = 'error' + (light ? ' boot-light' : '');
           el.innerHTML =
             '<h1>' +
             (title || 'Something went wrong') +

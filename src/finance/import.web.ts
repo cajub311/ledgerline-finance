@@ -1,4 +1,5 @@
 import { parseObjectStatementRows, parseStatementText } from './import.shared';
+import { pageTextItemsToLines, type PdfTextItem } from './pdfText';
 import type { ParsedStatementBatch } from './types';
 
 async function readPdfText(arrayBuffer: ArrayBuffer): Promise<string> {
@@ -12,14 +13,9 @@ async function readPdfText(arrayBuffer: ArrayBuffer): Promise<string> {
   for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
     const page = await document.getPage(pageNumber);
     const textContent = await page.getTextContent();
-    const line = textContent.items
-      .map((item: { str?: string }) => item.str ?? '')
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    if (line) {
-      parts.push(line);
+    const lines = pageTextItemsToLines(textContent.items as PdfTextItem[]);
+    if (lines.length > 0) {
+      parts.push(...lines);
     }
   }
 
@@ -29,6 +25,16 @@ async function readPdfText(arrayBuffer: ArrayBuffer): Promise<string> {
 export async function parseStatementBlob(file: File): Promise<ParsedStatementBatch> {
   const lowerName = file.name.toLowerCase();
   const buffer = await file.arrayBuffer();
+
+  if (lowerName.endsWith('.json') || /application\/json/i.test(file.type)) {
+    const peek = new TextDecoder('utf-8', { fatal: false }).decode(buffer.slice(0, 512));
+    const looksLikeBackup = /^\s*\{/.test(peek) && /"version"\s*:\s*1/.test(peek) && /"transactions"\s*:\s*\[/.test(peek);
+    if (looksLikeBackup) {
+      throw new Error(
+        `"${file.name}" is a full Ledgerline backup. Use “Restore from JSON” under Backups instead of statement import.`,
+      );
+    }
+  }
 
   if (lowerName.endsWith('.pdf') || file.type === 'application/pdf') {
     const text = await readPdfText(buffer);

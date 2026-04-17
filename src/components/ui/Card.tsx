@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { Platform, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 
 import { useTheme } from '../../theme/ThemeContext';
 import { radius, spacing, typography } from '../../theme/tokens';
@@ -15,6 +15,13 @@ interface CardProps {
 
 export function Card({ title, eyebrow, action, children, padding = spacing.xl, style }: CardProps) {
   const { palette } = useTheme();
+  const webShadow =
+    Platform.OS === 'web'
+      ? ({
+          boxShadow: `0 1px 0 ${palette.borderSoft}, 0 12px 28px -18px ${palette.overlay}`,
+        } as ViewStyle)
+      : null;
+
   return (
     <View
       style={[
@@ -24,6 +31,7 @@ export function Card({ title, eyebrow, action, children, padding = spacing.xl, s
           borderColor: palette.borderSoft,
           padding,
         },
+        webShadow,
         style,
       ]}
     >

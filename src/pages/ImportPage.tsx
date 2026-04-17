@@ -5,7 +5,7 @@ import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
-import { buildTransactionsCsv } from '../finance/export';
+import { buildTransactionsCsv, buildTransactionsXlsxBuffer } from '../finance/export';
 import { parseStatementBlob } from '../finance/import';
 import {
   mappingIsComplete,
@@ -98,9 +98,12 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
     try {
       setBusy(true);
       const files = await pickWebStatementFiles();
-      const file = files.find((f) => f.name.toLowerCase().endsWith('.csv'));
+      const file = files.find((f) => {
+        const n = f.name.toLowerCase();
+        return n.endsWith('.csv') || n.endsWith('.tsv') || n.endsWith('.txt');
+      });
       if (!file) {
-        notify('Select a .csv file for the mapping wizard.', 'danger');
+        notify('Select a .csv or .tsv file for the mapping wizard.', 'danger');
         return;
       }
       const text = await file.text();
@@ -215,7 +218,7 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
   const exportCsv = () => {
     if (typeof document === 'undefined') return;
     const csv = buildTransactionsCsv(state);
-    const blob = new Blob([csv], { type: 'text/csv' });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -223,6 +226,32 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
     link.click();
     URL.revokeObjectURL(url);
     notify(`Exported ${state.transactions.length} transactions to CSV.`, 'success');
+  };
+
+  const exportXlsx = async () => {
+    if (typeof document === 'undefined') return;
+    try {
+      setBusy(true);
+      const bytes = await buildTransactionsXlsxBuffer(state);
+      const arrayBuffer = bytes.buffer.slice(
+        bytes.byteOffset,
+        bytes.byteOffset + bytes.byteLength,
+      ) as ArrayBuffer;
+      const blob = new Blob([arrayBuffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `ledgerline-transactions-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(url);
+      notify(`Exported ${state.transactions.length} transactions to Excel (.xlsx).`, 'success');
+    } catch (error) {
+      notify(`Excel export failed: ${getErrorMessage(error)}`, 'danger');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const exportJson = () => {
@@ -262,7 +291,8 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
       <View>
         <Text style={[styles.title, { color: palette.text }]}>Import & export</Text>
         <Text style={[styles.subtitle, { color: palette.textMuted }]}>
-          Upload statements from any bank (CSV, XLSX, or PDF), paste text, or back up your whole ledger.
+          Upload statements (CSV, TSV, XLSX, or PDF), paste text, or back up your whole ledger. European semicolon CSVs
+          and tab exports are detected automatically.
         </Text>
       </View>
 
@@ -318,12 +348,12 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
 
       <Card title="CSV import wizard" eyebrow="Preview · map columns · dedupe">
         <Text style={{ color: palette.textMuted, fontSize: typography.small, lineHeight: 19, marginBottom: spacing.md }}>
-          For bank CSVs (Wells Fargo, Chase, etc.): we auto-suggest column roles. Preview the first 10 rows, adjust
-          mappings, then import. Duplicates are skipped using the same date + payee + amount key as quick import.
+          For bank exports (CSV, TSV, or semicolon-separated): we auto-suggest column roles. Preview the first 10 rows,
+          adjust mappings, then import. Duplicates are skipped using the same date + payee + amount key as quick import.
         </Text>
         <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap', marginBottom: spacing.md }}>
           <Button
-            label={busy ? 'Loading…' : 'Load CSV file'}
+            label={busy ? 'Loading…' : 'Load CSV / TSV file'}
             onPress={handleWizardCsvFile}
             disabled={busy || !webOnly || !accountId}
             variant="secondary"
@@ -413,10 +443,10 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
       </Card>
 
       <View style={styles.grid}>
-        <Card title="Upload files" eyebrow="CSV · XLSX · PDF" style={styles.flex1}>
+        <Card title="Upload files" eyebrow="CSV · TSV · XLSX · PDF" style={styles.flex1}>
           <Text style={{ color: palette.textMuted, fontSize: typography.small, lineHeight: 19 }}>
-            We detect the column headers automatically for most banks. Duplicates are skipped by
-            date, payee, and amount.
+            We detect delimiters and column headers for most banks. Full-app JSON backups should use “Restore from JSON”
+            — picking one as a statement shows a clear error. Duplicates are skipped by date, payee, and amount.
           </Text>
           <Button
             label={busy ? 'Importing…' : 'Choose file(s)'}
@@ -459,6 +489,7 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
         </Text>
         <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
           <Button label="Export CSV (transactions)" variant="secondary" onPress={exportCsv} />
+          <Button label="Export Excel (.xlsx)" variant="secondary" onPress={exportXlsx} disabled={busy} />
           <Button label="Export JSON backup" onPress={exportJson} />
           <Button label="Restore from JSON" variant="ghost" onPress={importBackup} disabled={busy} />
         </View>

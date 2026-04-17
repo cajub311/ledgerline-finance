@@ -13,6 +13,16 @@ if (typeof window !== 'undefined') {
     const fn = (window as unknown as { __ledgerlineRemoveBoot?: () => void }).__ledgerlineRemoveBoot;
     fn?.();
   };
+  try {
+    const stored = window.localStorage.getItem('ledgerline/theme-mode');
+    const mode = stored === 'light' || stored === 'dark' ? stored : 'dark';
+    const boot = document.getElementById('ledgerline-boot');
+    if (boot && mode === 'light') {
+      boot.classList.add('boot-light');
+    }
+  } catch {
+    // ignore
+  }
   requestAnimationFrame(() => requestAnimationFrame(removeBoot));
   setTimeout(removeBoot, 800);
 }

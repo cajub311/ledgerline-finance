@@ -36,3 +36,19 @@ export function buildTransactionsCsv(state: FinanceState): string {
     .map((row) => row.map((value) => escapeCsv(value)).join(','))
     .join('\n');
 }
+
+/** Excel workbook bytes for “open in Numbers / Sheets / Excel” workflows. */
+export async function buildTransactionsXlsxBuffer(state: FinanceState): Promise<Uint8Array> {
+  const XLSX = await import('xlsx');
+  const rows: string[][] = [
+    ['date', 'payee', 'amount', 'category', 'account', 'reviewed', 'source', 'notes'],
+    ...state.transactions
+      .slice()
+      .sort((left, right) => right.date.localeCompare(left.date))
+      .map((transaction) => transactionToRow(state, transaction)),
+  ];
+  const sheet = XLSX.utils.aoa_to_sheet(rows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, 'Transactions');
+  return XLSX.write(workbook, { bookType: 'xlsx', type: 'array' }) as Uint8Array;
+}

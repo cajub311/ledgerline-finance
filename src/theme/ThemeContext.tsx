@@ -35,6 +35,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     } catch {
       // ignore
     }
+    const root = typeof document !== 'undefined' ? document.documentElement : null;
+    if (root) {
+      root.style.colorScheme = mode === 'dark' ? 'dark' : 'light';
+    }
     const body = typeof document !== 'undefined' ? document.body : null;
     if (body) {
       body.style.background = palettes[mode].bg;

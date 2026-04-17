@@ -47,3 +47,25 @@ test('CSV wizard mapping parses debit/credit columns', () => {
   assert.equal(rows[0]?.amount, 3920);
   assert.equal(rows[1]?.amount, -12.34);
 });
+
+test('parses tab-separated (TSV) bank export', () => {
+  const rows = parseDelimitedStatement(
+    ['Date\tDescription\tAmount', '04/05/2026\tPayroll Deposit\t3920.00', '04/04/2026\tUber, LLC\t-12.34'].join('\n'),
+  );
+
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0]?.payee, 'Payroll Deposit');
+  assert.equal(rows[0]?.amount, 3920);
+  assert.equal(rows[1]?.payee, 'Uber, LLC');
+  assert.equal(rows[1]?.amount, -12.34);
+});
+
+test('parses semicolon-separated CSV', () => {
+  const rows = parseDelimitedStatement(
+    ['Date;Description;Amount', '04/05/2026;Coffee;-3.50', '04/04/2026;Salary;2500.00'].join('\n'),
+  );
+
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0]?.amount, -3.5);
+  assert.equal(rows[1]?.amount, 2500);
+});
