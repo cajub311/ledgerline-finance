@@ -20,9 +20,14 @@ export function Card({ title, eyebrow, action, children, padding = spacing.xl, s
       style={[
         styles.shell,
         {
-          backgroundColor: palette.surface,
+          backgroundColor: palette.surfaceRaised,
           borderColor: palette.borderSoft,
           padding,
+          shadowColor: '#000000',
+          shadowOpacity: 0.06,
+          shadowRadius: 12,
+          shadowOffset: { width: 0, height: 4 },
+          elevation: 2,
         },
         style,
       ]}

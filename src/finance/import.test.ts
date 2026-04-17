@@ -8,6 +8,17 @@ import {
   suggestColumnRoles,
 } from './import.shared';
 
+test('parses tab-separated (TSV) export rows', () => {
+  const rows = parseDelimitedStatement(
+    ['Date\tDescription\tAmount', '04/05/2026\tCoffee\t-4.50', '04/04/2026\tDeposit\t100.00'].join('\n'),
+  );
+
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0]?.payee, 'Coffee');
+  assert.equal(rows[0]?.amount, -4.5);
+  assert.equal(rows[1]?.amount, 100);
+});
+
 test('parses Wells Fargo-style CSV rows', () => {
   const rows = parseDelimitedStatement(
     [

@@ -35,9 +35,18 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     } catch {
       // ignore
     }
-    const body = typeof document !== 'undefined' ? document.body : null;
+    const doc = typeof document !== 'undefined' ? document : null;
+    const body = doc?.body ?? null;
     if (body) {
       body.style.background = palettes[mode].bg;
+    }
+    if (doc?.documentElement) {
+      doc.documentElement.dataset.theme = mode;
+      doc.documentElement.style.colorScheme = mode === 'dark' ? 'dark' : 'light';
+    }
+    const meta = doc?.querySelector('meta[name="theme-color"]');
+    if (meta && 'setAttribute' in meta) {
+      (meta as HTMLMetaElement).setAttribute('content', palettes[mode].bg);
     }
   }, [mode]);
 

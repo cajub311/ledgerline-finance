@@ -123,7 +123,7 @@ function AppShell() {
             onSelect={setActiveTab}
             householdName={state.householdName}
           />
-          <PageContainer>
+          <PageContainer wide>
             {loadError ? <LoadErrorBanner message={loadError} /> : null}
             <PageBody tab={activeTab} state={state} onStateChange={setState} />
           </PageContainer>
@@ -137,7 +137,7 @@ function AppShell() {
             householdName={state.householdName}
             compact
           />
-          <PageContainer>
+          <PageContainer wide={false}>
             {loadError ? <LoadErrorBanner message={loadError} /> : null}
             <PageBody tab={activeTab} state={state} onStateChange={setState} />
           </PageContainer>
@@ -147,10 +147,10 @@ function AppShell() {
   );
 }
 
-function PageContainer({ children }: { children: React.ReactNode }) {
+function PageContainer({ children, wide }: { children: React.ReactNode; wide: boolean }) {
   return (
     <ScrollView
-      contentContainerStyle={styles.scroll}
+      contentContainerStyle={[styles.scroll, wide ? styles.scrollWide : styles.scrollNarrow]}
       style={styles.scrollWrap}
       showsVerticalScrollIndicator={false}
     >
@@ -219,17 +219,28 @@ const styles = StyleSheet.create({
   wideLayout: {
     flex: 1,
     flexDirection: 'row',
+    alignItems: 'stretch',
+    minHeight: 0,
   },
   narrowLayout: {
     flex: 1,
     flexDirection: 'column',
+    minHeight: 0,
   },
   scrollWrap: {
     flex: 1,
+    minHeight: 0,
   },
   scroll: {
     padding: spacing.xl,
     paddingBottom: spacing.xxxl,
+    flexGrow: 1,
+  },
+  scrollWide: {
+    alignItems: 'stretch',
+  },
+  scrollNarrow: {
+    alignItems: 'stretch',
   },
   page: {
     width: '100%',

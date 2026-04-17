@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useTheme } from '../../theme/ThemeContext';
 import { radius, spacing, typography } from '../../theme/tokens';
@@ -103,45 +103,51 @@ export function Sidebar<T extends string>({
         </View>
       </View>
 
-      <View style={{ gap: 4 }}>
-        {items.map((item) => {
-          const active = item.value === activeValue;
-          return (
-            <Pressable
-              key={item.value}
-              onPress={() => onSelect(item.value)}
-              style={({ hovered }) => [
-                styles.item,
-                {
-                  backgroundColor: active
-                    ? palette.primarySoft
-                    : hovered
-                      ? palette.surfaceSunken
-                      : 'transparent',
-                },
-              ]}
-            >
-              <Text style={styles.icon}>{item.icon}</Text>
-              <Text
-                style={[
-                  styles.label,
-                  { color: active ? palette.primary : palette.textMuted },
-                  active && { fontWeight: '800' },
+      <ScrollView
+        style={styles.navScroll}
+        contentContainerStyle={styles.navScrollContent}
+        showsVerticalScrollIndicator={Platform.OS === 'web'}
+      >
+        <View style={{ gap: 4 }}>
+          {items.map((item) => {
+            const active = item.value === activeValue;
+            return (
+              <Pressable
+                key={item.value}
+                onPress={() => onSelect(item.value)}
+                style={({ hovered }) => [
+                  styles.item,
+                  {
+                    backgroundColor: active
+                      ? palette.primarySoft
+                      : hovered
+                        ? palette.surfaceSunken
+                        : 'transparent',
+                  },
                 ]}
               >
-                {item.label}
-              </Text>
-              {item.badge ? (
-                <View style={[styles.badgeInline, { backgroundColor: palette.primary }]}>
-                  <Text style={[styles.badgeText, { color: palette.primaryText }]}>
-                    {item.badge}
-                  </Text>
-                </View>
-              ) : null}
-            </Pressable>
-          );
-        })}
-      </View>
+                <Text style={styles.icon}>{item.icon}</Text>
+                <Text
+                  style={[
+                    styles.label,
+                    { color: active ? palette.primary : palette.textMuted },
+                    active && { fontWeight: '800' },
+                  ]}
+                >
+                  {item.label}
+                </Text>
+                {item.badge ? (
+                  <View style={[styles.badgeInline, { backgroundColor: palette.primary }]}>
+                    <Text style={[styles.badgeText, { color: palette.primaryText }]}>
+                      {item.badge}
+                    </Text>
+                  </View>
+                ) : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      </ScrollView>
 
       <View style={styles.footerNote}>
         <Text style={[styles.footerTitle, { color: palette.text }]}>Local-first</Text>
@@ -156,9 +162,19 @@ export function Sidebar<T extends string>({
 const styles = StyleSheet.create({
   shell: {
     width: 240,
+    alignSelf: 'stretch',
     padding: spacing.lg,
-    gap: spacing.xl,
+    gap: spacing.md,
     borderRightWidth: 1,
+  },
+  navScroll: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minHeight: 0,
+  },
+  navScrollContent: {
+    paddingBottom: spacing.sm,
+    flexGrow: 1,
   },
   brand: {
     flexDirection: 'row',

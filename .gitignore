@@ -7,6 +7,9 @@ node_modules/
 .expo/
 dist/
 web-build/
+
+# Copied from pdfjs-dist at install time (see scripts/copy-pdf-worker.mjs)
+public/pdf.worker.min.mjs
 expo-env.d.ts
 
 # Native
