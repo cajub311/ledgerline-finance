@@ -8,12 +8,18 @@ import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
 import {
+  getBudgetEnvelopes,
   getBudgetStatus,
   getCategoryBreakdown,
   getCategoryIcon,
   getCategoryOptions,
+  getEnvelopeAssignedTotal,
+  getFinanceSummary,
+  getReadyToAssign,
+  patchBudget,
   removeBudget,
   setBudget,
+  setBudgetEnvelopeMode,
 } from '../finance/ledger';
 import type { FinanceState } from '../finance/types';
 import { useTheme } from '../theme/ThemeContext';
@@ -31,7 +37,20 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
 
+  const envelopeMode = state.preferences.budgetEnvelopeMode;
+
   const statuses = useMemo(() => getBudgetStatus(state, year, month), [state, year, month]);
+  const envelopesById = useMemo(
+    () => getBudgetEnvelopes(state, year, month),
+    [state.transactions, state.budgets, year, month],
+  );
+  const readyToAssign = useMemo(() => getReadyToAssign(state, year, month), [state, year, month]);
+  const summary = useMemo(() => getFinanceSummary(state), [state]);
+  const assignedThisMonth = useMemo(
+    () => getEnvelopeAssignedTotal(state, year, month),
+    [state.budgets, year, month],
+  );
+
   const breakdown = useMemo(
     () => getCategoryBreakdown(state.transactions, year, month),
     [state.transactions, year, month],
@@ -42,6 +61,7 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
   const [editCategory, setEditCategory] = useState<string | null>(null);
   const [category, setCategory] = useState('Groceries');
   const [limit, setLimit] = useState('');
+  const [rolloverDraft, setRolloverDraft] = useState(true);
 
   const totalLimit = statuses.reduce((s, b) => s + b.limit, 0);
   const totalSpent = statuses.reduce((s, b) => s + b.spent, 0);
@@ -54,20 +74,25 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
     setEditCategory(null);
     setCategory('Groceries');
     setLimit('');
+    setRolloverDraft(true);
     setShowAdd(true);
   };
 
-  const openEdit = (cat: string, currentLimit: number) => {
+  const openEdit = (cat: string, currentLimit: number, rollover: boolean) => {
     setEditCategory(cat);
     setCategory(cat);
     setLimit(String(currentLimit));
+    setRolloverDraft(rollover);
     setShowAdd(true);
   };
 
   const save = () => {
     const numeric = Number.parseFloat(limit);
     if (!Number.isFinite(numeric) || numeric < 0) return;
-    onStateChange(setBudget(state, category, numeric));
+    let next = setBudget(state, category, numeric);
+    const b = next.budgets.find((x) => x.category === category);
+    if (b) next = patchBudget(next, b.id, { rollover: rolloverDraft });
+    onStateChange(next);
     setShowAdd(false);
   };
 
@@ -84,11 +109,49 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
         <View style={{ flex: 1, minWidth: 240 }}>
           <Text style={[styles.title, { color: palette.text }]}>Budgets</Text>
           <Text style={[styles.subtitle, { color: palette.textMuted }]}>
-            {now.toLocaleString('default', { month: 'long', year: 'numeric' })} · {formatCurrency(totalSpent)} spent of {formatCurrency(totalLimit)} budgeted
+            {now.toLocaleString('default', { month: 'long', year: 'numeric' })} · {formatCurrency(totalSpent)} spent of{' '}
+            {formatCurrency(totalLimit)} budgeted
           </Text>
         </View>
         <Button label="New budget" onPress={openAdd} />
       </View>
+
+      <Card title="Budget style" eyebrow="View">
+        <Select
+          value={envelopeMode ? 'envelope' : 'flow'}
+          onChange={(v) => onStateChange(setBudgetEnvelopeMode(state, v === 'envelope'))}
+          options={[
+            { value: 'flow', label: 'Flow (limit vs spent)' },
+            { value: 'envelope', label: 'Envelope (rollover)' },
+          ]}
+        />
+        {envelopeMode ? (
+          <View
+            style={[
+              styles.rtaBanner,
+              {
+                backgroundColor:
+                  readyToAssign >= 0 ? palette.successSoft : palette.dangerSoft,
+                borderColor: readyToAssign >= 0 ? palette.success : palette.danger,
+              },
+            ]}
+          >
+            <Text style={[styles.rtaLabel, { color: palette.textMuted }]}>Ready to assign</Text>
+            <Text
+              style={[
+                styles.rtaValue,
+                { color: readyToAssign >= 0 ? palette.success : palette.danger },
+              ]}
+            >
+              {formatCurrency(readyToAssign)}
+            </Text>
+            <Text style={[styles.rtaHint, { color: palette.textSubtle }]}>
+              This month’s income ({formatCurrency(summary.monthIncome)}) minus assigned envelope limits (
+              {formatCurrency(assignedThisMonth)}).
+            </Text>
+          </View>
+        ) : null}
+      </Card>
 
       {statuses.length === 0 ? (
         <Card
@@ -110,6 +173,7 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
                   setEditCategory(null);
                   setCategory(c);
                   setLimit('');
+                  setRolloverDraft(true);
                   setShowAdd(true);
                 }}
               />
@@ -119,17 +183,28 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
       ) : (
         <View style={{ gap: spacing.md }}>
           {statuses.map((status) => {
-            const pct = Math.min(1, status.pct);
+            const budgetRow = state.budgets.find((b) => b.category === status.category);
+            const env = budgetRow ? envelopesById[budgetRow.id] : undefined;
+            const displayOver = envelopeMode && env ? env.available < 0 : status.status === 'over';
+            const displayWarn = envelopeMode && env ? env.status === 'warning' && !displayOver : status.status === 'warning';
+            const envelopeDenom =
+              envelopeMode && env ? Math.abs(env.carriedIn + env.assigned) : 0;
+            const pct =
+              envelopeMode && env
+                ? Math.min(1, envelopeDenom > 1e-6 ? env.spent / envelopeDenom : 0)
+                : Math.min(1, status.pct);
             const color =
-              status.status === 'over'
+              displayOver
                 ? palette.danger
-                : status.status === 'warning'
+                : displayWarn
                   ? palette.warning
                   : palette.success;
             return (
               <Pressable
                 key={status.category}
-                onPress={() => openEdit(status.category, status.limit)}
+                onPress={() =>
+                  openEdit(status.category, status.limit, budgetRow?.rollover !== false)
+                }
                 style={({ hovered }) => [
                   styles.budget,
                   {
@@ -151,25 +226,31 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.cat, { color: palette.text }]}>{status.category}</Text>
                       <Text style={[styles.catMeta, { color: palette.textMuted }]}>
-                        {formatCurrency(status.spent)} of {formatCurrency(status.limit)} ·{' '}
-                        {Math.round(status.pct * 100)}%
+                        {envelopeMode && env ? (
+                          <>
+                            Spent {formatCurrency(env.spent)} · assigned {formatCurrency(env.assigned)}
+                            {env.carriedIn !== 0 ? ` · rolled ${formatCurrency(env.carriedIn)}` : ''} · available{' '}
+                            {formatCurrency(env.available)} · {Math.round(Math.min(1, pct) * 100)}%
+                          </>
+                        ) : (
+                          <>
+                            {formatCurrency(status.spent)} of {formatCurrency(status.limit)} ·{' '}
+                            {Math.round(status.pct * 100)}%
+                          </>
+                        )}
                       </Text>
                     </View>
                   </View>
                   <Badge
                     label={
-                      status.status === 'over'
+                      displayOver
                         ? 'Over budget'
-                        : status.status === 'warning'
+                        : displayWarn
                           ? 'Getting close'
                           : 'On track'
                     }
                     tone={
-                      status.status === 'over'
-                        ? 'danger'
-                        : status.status === 'warning'
-                          ? 'warning'
-                          : 'success'
+                      displayOver ? 'danger' : displayWarn ? 'warning' : 'success'
                     }
                   />
                 </View>
@@ -182,10 +263,29 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
                   />
                 </View>
                 <Text style={[styles.remaining, { color: palette.textSubtle }]}>
-                  {status.limit - status.spent > 0
-                    ? `${formatCurrency(status.limit - status.spent)} remaining`
-                    : `${formatCurrency(status.spent - status.limit)} over`}
+                  {envelopeMode && env
+                    ? env.available >= 0
+                      ? `${formatCurrency(env.available)} available`
+                      : `${formatCurrency(Math.abs(env.available))} over`
+                    : status.limit - status.spent > 0
+                      ? `${formatCurrency(status.limit - status.spent)} remaining`
+                      : `${formatCurrency(status.spent - status.limit)} over`}
                 </Text>
+                {envelopeMode && budgetRow ? (
+                  <View style={styles.inlineLimit}>
+                    <Input
+                      label="Monthly limit"
+                      value={String(budgetRow.monthlyLimit)}
+                      onChangeText={(t) => {
+                        if (t.trim() === '') return;
+                        const n = Number.parseFloat(t);
+                        if (!Number.isFinite(n) || n < 0) return;
+                        onStateChange(patchBudget(state, budgetRow.id, { monthlyLimit: n }));
+                      }}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                ) : null}
               </Pressable>
             );
           })}
@@ -211,6 +311,7 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
                       setEditCategory(null);
                       setCategory(b.category);
                       setLimit(String(Math.ceil(b.total / 10) * 10));
+                      setRolloverDraft(true);
                       setShowAdd(true);
                     }}
                   />
@@ -251,6 +352,15 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
           placeholder="e.g. 400"
           keyboardType="decimal-pad"
         />
+        <Select
+          label="Rollover unused balance"
+          value={rolloverDraft ? 'on' : 'off'}
+          onChange={(v) => setRolloverDraft(v === 'on')}
+          options={[
+            { value: 'on', label: 'On (surplus rolls forward)' },
+            { value: 'off', label: 'Off (surplus does not roll; debt still rolls)' },
+          ]}
+        />
       </Modal>
     </View>
   );
@@ -286,4 +396,15 @@ const styles = StyleSheet.create({
   fill: { height: '100%', borderRadius: radius.pill },
   remaining: { fontSize: typography.small, fontWeight: '600' },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  rtaBanner: {
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    gap: 4,
+  },
+  rtaLabel: { fontSize: typography.micro, fontWeight: '700', textTransform: 'uppercase' },
+  rtaValue: { fontSize: typography.title, fontWeight: '800' },
+  rtaHint: { fontSize: typography.micro, lineHeight: 17, marginTop: 4 },
+  inlineLimit: { marginTop: spacing.sm },
 });
