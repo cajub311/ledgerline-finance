@@ -8,10 +8,12 @@ import {
   createFinanceState,
   getBudgetStatus,
   getFinanceSummary,
+  getNetWorthSeries,
   getSafeToSpend,
   rotateTransactionCategory,
   setBudget,
 } from './ledger';
+import type { FinanceAccount, FinanceState, FinanceTransaction } from './types';
 
 test('summary reflects the seeded ledger', () => {
   const state = createFinanceState();
@@ -79,4 +81,78 @@ test('setBudget adds a category limit visible in budget status', () => {
 
   assert.ok(row);
   assert.equal(row?.limit, 100);
+});
+
+test('getNetWorthSeries: length, monotonic months, final matches summary, liabilities non-positive', (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-04-20T12:00:00Z') });
+  const state = createFinanceState();
+  const summary = getFinanceSummary(state);
+
+  const s3 = getNetWorthSeries(state, 3);
+  assert.equal(s3.length, 3);
+  for (let i = 1; i < s3.length; i += 1) {
+    assert.ok(s3[i]!.monthKey >= s3[i - 1]!.monthKey);
+  }
+  assert.equal(s3[s3.length - 1]!.netWorth, summary.netWorth);
+  for (const p of s3) {
+    assert.ok(p.assets >= 0);
+    assert.ok(p.liabilities <= 0);
+  }
+
+  const sAll = getNetWorthSeries(state, 0);
+  assert.ok(sAll.length >= s3.length);
+  assert.equal(sAll[sAll.length - 1]!.netWorth, summary.netWorth);
+
+  t.mock.timers.reset();
+});
+
+test('getNetWorthSeries: credit liability stays in liabilities bucket', (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-04-15T12:00:00Z') });
+  const accounts: FinanceAccount[] = [
+    {
+      id: 'a-check',
+      name: 'Checking',
+      institution: 'X',
+      type: 'checking',
+      source: 'manual',
+      openingBalance: 1000,
+      lastSynced: '2026-04-01',
+    },
+    {
+      id: 'a-card',
+      name: 'Card',
+      institution: 'X',
+      type: 'credit',
+      source: 'manual',
+      openingBalance: -100,
+      lastSynced: '2026-04-01',
+    },
+  ];
+  const transactions: FinanceTransaction[] = [
+    {
+      id: 'nw-1',
+      accountId: 'a-check',
+      date: '2026-04-10',
+      payee: 'Shop',
+      amount: -50,
+      category: 'Shopping',
+      source: 'manual',
+      reviewed: true,
+    },
+  ];
+  const state: FinanceState = {
+    ...createFinanceState(),
+    accounts,
+    transactions,
+    budgets: [],
+    goals: [],
+    imports: [],
+  };
+  const series = getNetWorthSeries(state, 2);
+  const last = series[series.length - 1]!;
+  assert.equal(last.assets, 950);
+  assert.equal(last.liabilities, -100);
+  assert.equal(last.netWorth, 850);
+  assert.equal(last.netWorth, getFinanceSummary(state).netWorth);
+  t.mock.timers.reset();
 });
