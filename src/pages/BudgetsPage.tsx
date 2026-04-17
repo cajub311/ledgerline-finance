@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -8,16 +8,20 @@ import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
 import {
+  getBudgetEnvelopes,
   getBudgetStatus,
   getCategoryBreakdown,
   getCategoryIcon,
   getCategoryOptions,
+  getReadyToAssign,
   removeBudget,
   setBudget,
+  setEnvelopeBudgetingMode,
+  updateBudgetEnvelope,
 } from '../finance/ledger';
 import type { FinanceState } from '../finance/types';
 import { useTheme } from '../theme/ThemeContext';
-import { radius, spacing, typography } from '../theme/tokens';
+import { radius, spacing, typography, type ThemePalette } from '../theme/tokens';
 import { formatCurrency } from '../utils/format';
 
 interface BudgetsPageProps {
@@ -31,12 +35,21 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
 
+  const envelopeMode = state.preferences.envelopeBudgeting === true;
+
+  const envelopeByBudgetId = useMemo(() => {
+    const list = getBudgetEnvelopes(state, year, month);
+    return Object.fromEntries(list.map((e) => [e.budgetId, e]));
+  }, [state.budgets, state.transactions, year, month]);
+
   const statuses = useMemo(() => getBudgetStatus(state, year, month), [state, year, month]);
   const breakdown = useMemo(
     () => getCategoryBreakdown(state.transactions, year, month),
     [state.transactions, year, month],
   );
   const categoryOptions = useMemo(() => getCategoryOptions(), []);
+
+  const readyToAssign = useMemo(() => getReadyToAssign(state, year, month), [state.transactions, state.budgets, year, month]);
 
   const [showAdd, setShowAdd] = useState(false);
   const [editCategory, setEditCategory] = useState<string | null>(null);
@@ -90,6 +103,36 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
         <Button label="New budget" onPress={openAdd} />
       </View>
 
+      <View style={styles.modeRow}>
+        <Text style={{ color: palette.textMuted, fontSize: typography.small, fontWeight: '700' }}>View</Text>
+        <View style={styles.modeChips}>
+          <ModeChip
+            label="Flow"
+            selected={!envelopeMode}
+            onPress={() => onStateChange(setEnvelopeBudgetingMode(state, false))}
+            palette={palette}
+          />
+          <ModeChip
+            label="Envelope"
+            selected={envelopeMode}
+            onPress={() => onStateChange(setEnvelopeBudgetingMode(state, true))}
+            palette={palette}
+          />
+        </View>
+      </View>
+
+      {envelopeMode ? (
+        <Card title="Ready to assign" eyebrow="This month income minus monthly limits">
+          <Text style={[styles.rtaAmount, { color: readyToAssign >= 0 ? palette.success : palette.danger }]}>
+            {formatCurrency(readyToAssign)}
+          </Text>
+          <Text style={{ color: palette.textMuted, fontSize: typography.small, marginTop: 6, lineHeight: 19 }}>
+            Assign every dollar to a category envelope. Positive means income not yet allocated to limits; negative
+            means limits exceed income.
+          </Text>
+        </Card>
+      ) : null}
+
       {statuses.length === 0 ? (
         <Card
           title="Start with a budget"
@@ -118,7 +161,9 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
         </Card>
       ) : (
         <View style={{ gap: spacing.md }}>
-          {statuses.map((status) => {
+          {statuses.map((status, idx) => {
+            const budget = state.budgets[idx]!;
+            const env = budget ? envelopeByBudgetId[budget.id] : undefined;
             const pct = Math.min(1, status.pct);
             const color =
               status.status === 'over'
@@ -126,15 +171,31 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
                 : status.status === 'warning'
                   ? palette.warning
                   : palette.success;
+
+            const metaLine = envelopeMode && env
+              ? `${formatCurrency(status.spent)} spent · carried in ${formatCurrency(env.carriedIn)} · available ${formatCurrency(env.available)}`
+              : `${formatCurrency(status.spent)} of ${formatCurrency(status.limit)} · ${Math.round(status.pct * 100)}%`;
+
+            const remainingLine =
+              envelopeMode && env
+                ? env.available >= 0
+                  ? `${formatCurrency(env.available)} available`
+                  : `${formatCurrency(Math.abs(env.available))} over available`
+                : status.limit - status.spent > 0
+                  ? `${formatCurrency(status.limit - status.spent)} remaining`
+                  : `${formatCurrency(status.spent - status.limit)} over`;
+
             return (
               <Pressable
                 key={status.category}
-                onPress={() => openEdit(status.category, status.limit)}
+                onPress={() => {
+                  if (!envelopeMode) openEdit(status.category, status.limit);
+                }}
                 style={({ hovered }) => [
                   styles.budget,
                   {
                     backgroundColor: palette.surface,
-                    borderColor: hovered ? palette.primary : palette.borderSoft,
+                    borderColor: hovered && !envelopeMode ? palette.primary : palette.borderSoft,
                   },
                 ]}
               >
@@ -150,16 +211,15 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.cat, { color: palette.text }]}>{status.category}</Text>
-                      <Text style={[styles.catMeta, { color: palette.textMuted }]}>
-                        {formatCurrency(status.spent)} of {formatCurrency(status.limit)} ·{' '}
-                        {Math.round(status.pct * 100)}%
-                      </Text>
+                      <Text style={[styles.catMeta, { color: palette.textMuted }]}>{metaLine}</Text>
                     </View>
                   </View>
                   <Badge
                     label={
                       status.status === 'over'
-                        ? 'Over budget'
+                        ? envelopeMode
+                          ? 'Over available'
+                          : 'Over budget'
                         : status.status === 'warning'
                           ? 'Getting close'
                           : 'On track'
@@ -173,6 +233,42 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
                     }
                   />
                 </View>
+                {envelopeMode && budget ? (
+                  <View style={styles.envelopeControls} onStartShouldSetResponder={() => true}>
+                    <View style={{ flex: 1, minWidth: 120 }}>
+                      <Text style={[styles.inlineLabel, { color: palette.textMuted }]}>Monthly limit</Text>
+                      <TextInput
+                        key={`${budget.id}-${budget.monthlyLimit}`}
+                        defaultValue={String(budget.monthlyLimit)}
+                        keyboardType="decimal-pad"
+                        onEndEditing={(e) => {
+                          const n = Number.parseFloat(e.nativeEvent.text);
+                          if (!Number.isFinite(n) || n < 0) return;
+                          onStateChange(updateBudgetEnvelope(state, budget.id, { monthlyLimit: n }));
+                        }}
+                        style={[
+                          styles.inlineInput,
+                          {
+                            borderColor: palette.border,
+                            backgroundColor: palette.surfaceSunken,
+                            color: palette.text,
+                          },
+                        ]}
+                        placeholderTextColor={palette.textSubtle}
+                      />
+                    </View>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      label={`Rollover: ${budget.rollover !== false ? 'on' : 'off'}`}
+                      onPress={() =>
+                        onStateChange(
+                          updateBudgetEnvelope(state, budget.id, { rollover: budget.rollover === false }),
+                        )
+                      }
+                    />
+                  </View>
+                ) : null}
                 <View style={[styles.track, { backgroundColor: palette.surfaceSunken }]}>
                   <View
                     style={[
@@ -181,11 +277,7 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
                     ]}
                   />
                 </View>
-                <Text style={[styles.remaining, { color: palette.textSubtle }]}>
-                  {status.limit - status.spent > 0
-                    ? `${formatCurrency(status.limit - status.spent)} remaining`
-                    : `${formatCurrency(status.spent - status.limit)} over`}
-                </Text>
+                <Text style={[styles.remaining, { color: palette.textSubtle }]}>{remainingLine}</Text>
               </Pressable>
             );
           })}
@@ -256,8 +348,69 @@ export function BudgetsPage({ state, onStateChange }: BudgetsPageProps) {
   );
 }
 
+function ModeChip({
+  label,
+  selected,
+  onPress,
+  palette,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+  palette: ThemePalette;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ hovered }) => [
+        styles.modeChip,
+        {
+          backgroundColor: selected ? palette.primary : palette.surfaceSunken,
+          borderColor: selected ? palette.primary : palette.border,
+          opacity: hovered && !selected ? 0.9 : 1,
+        },
+      ]}
+    >
+      <Text
+        style={{
+          color: selected ? palette.primaryText : palette.text,
+          fontSize: typography.small,
+          fontWeight: '700',
+        }}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap' },
+  modeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexWrap: 'wrap' },
+  modeChips: { flexDirection: 'row', gap: spacing.xs },
+  modeChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  rtaAmount: { fontSize: 28, fontWeight: '800', marginTop: 4 },
+  envelopeControls: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+    alignItems: 'flex-end',
+    marginTop: spacing.sm,
+  },
+  inlineLabel: { fontSize: typography.micro, fontWeight: '600', marginBottom: 4 },
+  inlineInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+    fontSize: typography.body,
+    fontWeight: '600',
+  },
   title: { fontSize: typography.display, fontWeight: '800' },
   subtitle: { fontSize: typography.small, marginTop: 4 },
   budget: {
