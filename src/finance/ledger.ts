@@ -20,6 +20,7 @@ import type {
   MonthlyTrendItem,
   ParsedStatementBatch,
   ParsedStatementRow,
+  ProjectedRecurringItem,
   TopMerchantItem,
 } from './types';
 
@@ -663,6 +664,89 @@ export function detectRecurringIncome(transactions: FinanceTransaction[]): Detec
   return incomes.sort((a, b) => b.annualTotal - a.annualTotal);
 }
 
+function gapDaysForFrequency(f: DetectedSubscription['frequency']): number {
+  if (f === 'weekly') return 7;
+  if (f === 'monthly') return 30;
+  return 365;
+}
+
+function confidenceFromOccurrences(occurrences: number): number {
+  return Math.min(0.95, 0.35 + Math.max(0, occurrences - 2) * 0.12);
+}
+
+function parseIsoDate(iso: string): Date {
+  const d = new Date(`${iso}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? new Date() : d;
+}
+
+function toIsoDateStatic(date: Date): string {
+  const y = date.getFullYear();
+  const m = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Upcoming projected charges and income from detected recurring patterns.
+ * Next date = last occurrence + cadence gap; repeats inside horizon. Sorted by date ascending.
+ */
+export function projectRecurring(state: FinanceState, horizonDays: number): ProjectedRecurringItem[] {
+  const horizon = Math.max(0, Math.floor(horizonDays));
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const startMs = start.getTime();
+  const end = new Date(start);
+  end.setDate(end.getDate() + horizon);
+  const endMs = end.getTime();
+
+  const subs = detectSubscriptions(state.transactions);
+  const incomes = detectRecurringIncome(state.transactions);
+  const out: ProjectedRecurringItem[] = [];
+
+  const pushOccurrences = (
+    lastIso: string,
+    payee: string,
+    amountSigned: number,
+    frequency: ProjectedRecurringItem['frequency'],
+    kind: ProjectedRecurringItem['kind'],
+    occurrences: number,
+  ) => {
+    const gap = gapDaysForFrequency(frequency);
+    const next = new Date(parseIsoDate(lastIso));
+    next.setDate(next.getDate() + gap);
+    while (next.getTime() <= startMs) {
+      next.setDate(next.getDate() + gap);
+    }
+
+    const conf = confidenceFromOccurrences(occurrences);
+    while (next.getTime() <= endMs) {
+      const iso = toIsoDateStatic(next);
+      out.push({
+        date: iso,
+        payee,
+        amount: Number(amountSigned.toFixed(2)),
+        frequency,
+        kind,
+        confidence: conf,
+      });
+      next.setDate(next.getDate() + gap);
+    }
+  };
+
+  for (const s of subs) {
+    pushOccurrences(s.lastCharged, s.payee, -Math.abs(s.amount), s.frequency, 'charge', s.occurrences);
+  }
+  for (const i of incomes) {
+    pushOccurrences(i.lastReceived, i.payee, Math.abs(i.amount), i.frequency, 'income', i.occurrences);
+  }
+
+  out.sort((a, b) => {
+    const c = a.date.localeCompare(b.date);
+    return c !== 0 ? c : a.payee.localeCompare(b.payee);
+  });
+  return out;
+}
+
 function monthSpendExcludingTransfer(transactions: FinanceTransaction[], year: number, month: number): number {
   const monthKey = `${year}-${`${month}`.padStart(2, '0')}`;
   return Number(
@@ -783,13 +867,6 @@ export function projectCashFlow(
     startBalance,
     horizonDays: Math.max(1, horizonDays),
   };
-}
-
-function toIsoDateStatic(date: Date): string {
-  const y = date.getFullYear();
-  const m = `${date.getMonth() + 1}`.padStart(2, '0');
-  const day = `${date.getDate()}`.padStart(2, '0');
-  return `${y}-${m}-${day}`;
 }
 
 export function setForecastLowBalanceThreshold(state: FinanceState, threshold: number): FinanceState {
