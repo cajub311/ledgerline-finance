@@ -9,7 +9,7 @@ Everything is organized into focused tabs:
 - **Budgets** — per-category monthly limits with live status (on track / close / over) and suggestions for unbudgeted spending.
 - **Goals** — savings targets with progress bars, days remaining, and the monthly save rate required to hit each target on time.
 - **Accounts** — add / edit / delete any combination of checking, savings, credit, cash, loan, or investment accounts.
-- **Import** — upload CSV, XLSX, or PDF statements from any bank (headers detected automatically), paste text, or export/restore a full JSON backup.
+- **Import & export** — drag & drop CSV / XLSX / PDF statements from any bank (headers detected automatically) or paste raw text. Export filtered subsets to CSV, a print‑ready **PDF statement**, **QIF** (Quicken / GnuCash / Moneydance), **OFX** (per‑account bank format), or a full JSON backup. **Undo** the last import with one click.
 - **Settings** — switch between light and dark mode, rename your household, and reset to demo data.
 
 The app is 100% client-side: transactions live in your browser (AsyncStorage / localStorage). Saves are debounced so typing does not write on every keystroke.
