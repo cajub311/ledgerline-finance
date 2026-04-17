@@ -8,10 +8,12 @@ import {
   createFinanceState,
   getBudgetStatus,
   getFinanceSummary,
+  getNetWorthSeries,
   getSafeToSpend,
   rotateTransactionCategory,
   setBudget,
 } from './ledger';
+import type { FinanceAccount, FinanceState, FinanceTransaction } from './types';
 
 test('summary reflects the seeded ledger', () => {
   const state = createFinanceState();
@@ -79,4 +81,78 @@ test('setBudget adds a category limit visible in budget status', () => {
 
   assert.ok(row);
   assert.equal(row?.limit, 100);
+});
+
+const AS_OF = new Date('2026-04-15T12:00:00.000Z');
+
+test('getNetWorthSeries length matches window for 3 / 6 / 12', () => {
+  const state = createFinanceState();
+  assert.equal(getNetWorthSeries(state, 3, AS_OF).length, 3);
+  assert.equal(getNetWorthSeries(state, 6, AS_OF).length, 6);
+  assert.equal(getNetWorthSeries(state, 12, AS_OF).length, 12);
+});
+
+test('getNetWorthSeries uses monotonic transaction dates in sort', () => {
+  const acct: FinanceAccount = {
+    id: 'a-nw',
+    name: 'C',
+    institution: 'X',
+    type: 'checking',
+    source: 'manual',
+    openingBalance: 1000,
+    lastSynced: '2026-01-01',
+  };
+  const txs: FinanceTransaction[] = [
+    {
+      id: 'z',
+      accountId: acct.id,
+      date: '2026-02-01',
+      payee: 'Late id',
+      amount: -10,
+      category: 'Dining',
+      source: 'manual',
+      reviewed: true,
+    },
+    {
+      id: 'a',
+      accountId: acct.id,
+      date: '2026-02-01',
+      payee: 'Early id',
+      amount: -5,
+      category: 'Dining',
+      source: 'manual',
+      reviewed: true,
+    },
+  ];
+  const state: FinanceState = {
+    ...createFinanceState(),
+    accounts: [acct],
+    transactions: txs,
+  };
+  const series = getNetWorthSeries(state, 3, new Date('2026-04-01'));
+  const feb = series.find((p) => p.monthKey === '2026-02');
+  assert.ok(feb);
+  assert.equal(feb?.netWorth, 985);
+});
+
+test('getNetWorthSeries last point matches getFinanceSummary netWorth', () => {
+  const state = createFinanceState();
+  const summary = getFinanceSummary(state);
+  const last = getNetWorthSeries(state, 6, AS_OF).at(-1);
+  assert.ok(last);
+  assert.equal(last?.netWorth, summary.netWorth);
+});
+
+test('getNetWorthSeries liabilities are non-positive', () => {
+  const state = createFinanceState();
+  for (const p of getNetWorthSeries(state, 6, AS_OF)) {
+    assert.ok(p.liabilities <= 0, `month ${p.monthKey}`);
+  }
+});
+
+test('getNetWorthSeries is idempotent for same inputs', () => {
+  const state = createFinanceState();
+  const a = getNetWorthSeries(state, 6, AS_OF);
+  const b = getNetWorthSeries(state, 6, AS_OF);
+  assert.deepEqual(a, b);
 });
