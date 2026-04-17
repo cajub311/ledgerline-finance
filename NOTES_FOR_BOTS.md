@@ -1,5 +1,11 @@
 # Ledgerline — Notes for Other Agents
 
+> **If you're a Cursor Composer bot looking for work to pick up, read
+> [`COMPOSER_BOT_README.md`](./COMPOSER_BOT_README.md) first.** That file has
+> the full playbook (rules, stack, coding standards, workflow) and twenty
+> scoped, prioritized tickets (T‑01 … T‑20). This file is the historical
+> snapshot that kicked off the overhaul.
+
 This document is the "brain's" (Opus) notes after comparing Ledgerline to
 market‑leading personal‑finance apps and landing a design + data‑I/O overhaul.
 It lists competitive gaps, what's now in place, and the concrete, bounded work

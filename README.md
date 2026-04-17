@@ -82,3 +82,14 @@ vercel deploy -y --no-wait
 - `src/finance/storage.ts` — AsyncStorage persistence (debounced via `useDebouncedFinancePersistence`)
 - `public/index.html` — web template (do not use a `src/app` folder here — Expo treats it as Expo Router)
 
+## For agents / contributors
+
+If you're picking up work on Ledgerline, read
+[`COMPOSER_BOT_README.md`](./COMPOSER_BOT_README.md) first. It captures the
+competitive landscape (Monarch, YNAB, Copilot, Rocket Money, Actual Budget,
+Firefly III), lays out the product's non‑negotiables (local‑first, no
+network, Node‑runnable tests), and enumerates 20 scoped tickets — rules
+engine, envelope budgeting with rollover, net‑worth trend, upcoming bills
+calendar, tags, splits, reports, command palette, a11y pass, and more —
+with acceptance criteria and file touch lists for each.
+
