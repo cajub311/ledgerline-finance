@@ -21,6 +21,7 @@ import type {
   ImportRecord,
   ManualTransactionDraft,
   MonthlyTrendItem,
+  NetWorthMonthPoint,
   ParsedStatementBatch,
   ParsedStatementRow,
   TopMerchantItem,
@@ -111,6 +112,121 @@ function accountBalance(account: FinanceAccount, transactions: FinanceTransactio
 
 function accountTypeIsLiquid(type: FinanceAccount['type']): boolean {
   return type === 'checking' || type === 'savings' || type === 'cash';
+}
+
+function monthKeyFromParts(year: number, month: number): string {
+  return `${year}-${`${month}`.padStart(2, '0')}`;
+}
+
+function shiftCalendarMonth(year: number, month: number, delta: number): { year: number; month: number } {
+  const idx = year * 12 + (month - 1) + delta;
+  return { year: Math.floor(idx / 12), month: (idx % 12) + 1 };
+}
+
+function monthKeysEndingAt(endYear: number, endMonth: number, count: number): string[] {
+  const keys: string[] = [];
+  for (let i = count - 1; i >= 0; i -= 1) {
+    const { year, month } = shiftCalendarMonth(endYear, endMonth, -i);
+    keys.push(monthKeyFromParts(year, month));
+  }
+  return keys;
+}
+
+function earliestTransactionMonthKey(transactions: FinanceTransaction[]): string | null {
+  let best: string | null = null;
+  for (const tx of transactions) {
+    const mk = tx.date.slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(mk)) continue;
+    if (!best || mk < best) best = mk;
+  }
+  return best;
+}
+
+function monthKeysFromToInclusive(startKey: string, endKey: string): string[] {
+  const keys: string[] = [];
+  const [sy, sm] = startKey.split('-').map(Number) as [number, number];
+  let y = sy;
+  let m = sm;
+  const [ey, em] = endKey.split('-').map(Number) as [number, number];
+  const endIdx = ey * 12 + (em - 1);
+  while (y * 12 + (m - 1) <= endIdx) {
+    keys.push(monthKeyFromParts(y, m));
+    const next = shiftCalendarMonth(y, m, 1);
+    y = next.year;
+    m = next.month;
+  }
+  return keys;
+}
+
+function pointFromBalances(
+  accounts: FinanceAccount[],
+  running: Record<string, number>,
+  monthKey: string,
+): NetWorthMonthPoint {
+  let assets = 0;
+  let liabilities = 0;
+  for (const account of accounts) {
+    const bal = Number((running[account.id] ?? 0).toFixed(2));
+    if (bal > 0) assets += bal;
+    else liabilities += bal;
+  }
+  assets = Number(assets.toFixed(2));
+  liabilities = Number(liabilities.toFixed(2));
+  const netWorth = Number((assets + liabilities).toFixed(2));
+  const [y, m] = monthKey.split('-').map(Number) as [number, number];
+  const label = new Date(y, m - 1, 1).toLocaleString('default', { month: 'short', year: '2-digit' });
+  return { monthKey, label, netWorth, assets, liabilities };
+}
+
+/**
+ * End-of-month net worth series. Walks transactions once in date order.
+ * Last entry uses all transactions through today (matches `getFinanceSummary(state).netWorth`).
+ * @param months — number of trailing calendar months (≥1), or `0` for “all” months from first transaction to now
+ */
+export function getNetWorthSeries(state: FinanceState, months: number): NetWorthMonthPoint[] {
+  const sorted = [...state.transactions].sort((a, b) => {
+    const c = a.date.localeCompare(b.date);
+    return c !== 0 ? c : a.id.localeCompare(b.id);
+  });
+
+  const now = new Date();
+  const endYear = now.getFullYear();
+  const endMonth = now.getMonth() + 1;
+  const endKey = monthKeyFromParts(endYear, endMonth);
+
+  let seriesKeys: string[];
+  if (!months || months <= 0) {
+    const earliest = earliestTransactionMonthKey(sorted);
+    const startKey = earliest && earliest < endKey ? earliest : endKey;
+    seriesKeys = monthKeysFromToInclusive(startKey, endKey);
+    if (seriesKeys.length === 0) seriesKeys = [endKey];
+  } else {
+    seriesKeys = monthKeysEndingAt(endYear, endMonth, Math.max(1, months));
+  }
+
+  const running: Record<string, number> = {};
+  for (const account of state.accounts) {
+    running[account.id] = Number.isFinite(account.openingBalance) ? account.openingBalance : 0;
+  }
+
+  const result: NetWorthMonthPoint[] = [];
+  let ptr = 0;
+
+  for (let i = 0; i < seriesKeys.length; i += 1) {
+    const mk = seriesKeys[i]!;
+    const isLast = i === seriesKeys.length - 1;
+    while (
+      ptr < sorted.length &&
+      (isLast ? true : sorted[ptr]!.date.slice(0, 7) <= mk)
+    ) {
+      const tx = sorted[ptr]!;
+      running[tx.accountId] = Number(((running[tx.accountId] ?? 0) + tx.amount).toFixed(2));
+      ptr += 1;
+    }
+    result.push(pointFromBalances(state.accounts, running, mk));
+  }
+
+  return result;
 }
 
 export function createFinanceState(): FinanceState {

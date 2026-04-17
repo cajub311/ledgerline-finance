@@ -204,3 +204,12 @@ export interface CashFlowProjection {
   startBalance: number;
   horizonDays: number;
 }
+
+/** One month in the net-worth history series (end-of-month balances). */
+export interface NetWorthMonthPoint {
+  monthKey: string;
+  label: string;
+  netWorth: number;
+  assets: number;
+  liabilities: number;
+}
