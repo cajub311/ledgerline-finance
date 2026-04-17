@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CashFlowLineChart } from '../components/charts/CashFlowLineChart';
 import { Button } from '../components/ui/Button';
@@ -9,9 +9,10 @@ import {
   detectRecurringIncome,
   detectSubscriptions,
   projectCashFlow,
+  projectRecurring,
   setForecastLowBalanceThreshold,
 } from '../finance/ledger';
-import type { FinanceState } from '../finance/types';
+import type { FinanceState, ProjectedRecurringItem } from '../finance/types';
 import { useTheme } from '../theme/ThemeContext';
 import { radius, spacing, typography } from '../theme/tokens';
 import { formatCurrency } from '../utils/format';
@@ -33,6 +34,22 @@ export function ForecastPage({ state, onStateChange }: ForecastPageProps) {
   const projection = useMemo(() => projectCashFlow(state, horizon), [state, horizon]);
   const subs = useMemo(() => detectSubscriptions(state.transactions), [state.transactions]);
   const incomes = useMemo(() => detectRecurringIncome(state.transactions), [state.transactions]);
+
+  const calNow = new Date();
+  const calYear = calNow.getFullYear();
+  const calMonth = calNow.getMonth();
+  const monthKey = `${calYear}-${`${calMonth + 1}`.padStart(2, '0')}`;
+  const projectedForCalendar = useMemo(() => projectRecurring(state, 62), [state]);
+  const itemsByDay = useMemo(() => {
+    const map: Record<string, ProjectedRecurringItem[]> = {};
+    for (const p of projectedForCalendar) {
+      if (!p.date.startsWith(monthKey)) continue;
+      if (!map[p.date]) map[p.date] = [];
+      map[p.date]!.push(p);
+    }
+    return map;
+  }, [projectedForCalendar, monthKey]);
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   const chartData = useMemo(
     () =>
@@ -189,6 +206,74 @@ export function ForecastPage({ state, onStateChange }: ForecastPageProps) {
           </Text>
         </Card>
       ) : null}
+
+      <Card
+        title="Upcoming calendar"
+        eyebrow={calNow.toLocaleString('default', { month: 'long', year: 'numeric' })}
+      >
+        <Text style={{ color: palette.textMuted, fontSize: typography.small, marginBottom: spacing.md, lineHeight: 20 }}>
+          Dots show projected recurring items from your ledger (red = charge, green = income). Tap a day for details.
+        </Text>
+        <View style={styles.calWeekRow}>
+          {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => (
+            <Text key={d} style={[styles.calWeekLabel, { color: palette.textSubtle }]}>
+              {d}
+            </Text>
+          ))}
+        </View>
+        <View style={styles.calGrid}>
+          {Array.from({ length: new Date(calYear, calMonth, 1).getDay() }).map((_, i) => (
+            <View key={`pad-${i}`} style={styles.calCell} />
+          ))}
+          {Array.from({ length: new Date(calYear, calMonth + 1, 0).getDate() }, (_, i) => {
+            const day = i + 1;
+            const iso = `${monthKey}-${`${day}`.padStart(2, '0')}`;
+            const dayItems = itemsByDay[iso] ?? [];
+            const hasCharge = dayItems.some((x) => x.kind === 'charge');
+            const hasIncome = dayItems.some((x) => x.kind === 'income');
+            const selected = selectedDay === iso;
+            return (
+              <Pressable
+                key={iso}
+                onPress={() => setSelectedDay((cur) => (cur === iso ? null : iso))}
+                style={[
+                  styles.calCell,
+                  {
+                    borderColor: selected ? palette.primary : palette.borderSoft,
+                    backgroundColor: selected ? palette.primarySoft : palette.surfaceSunken,
+                  },
+                ]}
+              >
+                <Text style={[styles.calDayNum, { color: palette.text }]}>{day}</Text>
+                <View style={styles.calDots}>
+                  {hasCharge ? <View style={[styles.dot, { backgroundColor: palette.danger }]} /> : null}
+                  {hasIncome ? <View style={[styles.dot, { backgroundColor: palette.success }]} /> : null}
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+        {selectedDay && (itemsByDay[selectedDay]?.length ?? 0) > 0 ? (
+          <View style={{ marginTop: spacing.md, gap: spacing.sm }}>
+            <Text style={{ color: palette.text, fontWeight: '800', fontSize: typography.small }}>{selectedDay}</Text>
+            {(itemsByDay[selectedDay] ?? []).map((item) => (
+              <View key={`${item.payee}-${item.kind}-${item.amount}`} style={styles.rowBetween}>
+                <Text style={{ color: palette.text, fontWeight: '600' }}>
+                  {item.kind === 'charge' ? '🔴' : '🟢'} {item.payee}
+                </Text>
+                <Text style={{ color: item.kind === 'income' ? palette.success : palette.textMuted }}>
+                  {item.amount >= 0 ? '+' : ''}
+                  {formatCurrency(item.amount)}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : selectedDay ? (
+          <Text style={{ color: palette.textSubtle, fontSize: typography.small, marginTop: spacing.md }}>
+            No projected items on this day.
+          </Text>
+        ) : null}
+      </Card>
     </View>
   );
 }
@@ -211,4 +296,46 @@ const styles = StyleSheet.create({
   bigNum: { fontSize: typography.title, fontWeight: '800' },
   twoCol: { flexDirection: 'row', gap: spacing.lg, flexWrap: 'wrap' },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  calWeekRow: {
+    flexDirection: 'row',
+    marginBottom: spacing.xs,
+  },
+  calWeekLabel: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: typography.micro,
+    fontWeight: '700',
+  },
+  calGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  calCell: {
+    width: '14.28%',
+    minWidth: 36,
+    aspectRatio: 1,
+    borderWidth: 1,
+    borderRadius: radius.sm,
+    padding: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  calDayNum: {
+    fontSize: typography.small,
+    fontWeight: '700',
+  },
+  calDots: {
+    flexDirection: 'row',
+    gap: 3,
+    marginTop: 2,
+    minHeight: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
 });

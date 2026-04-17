@@ -17,11 +17,12 @@ import {
   getFinancialHealthScore,
   getLatestTransactions,
   getMonthlyTrend,
+  projectRecurring,
   getSafeToSpend,
   getSavingsRate,
   getTopMerchants,
 } from '../finance/ledger';
-import type { FinanceState } from '../finance/types';
+import type { FinanceState, ProjectedRecurringItem } from '../finance/types';
 import { useTheme } from '../theme/ThemeContext';
 import { radius, spacing, typography } from '../theme/tokens';
 import { formatCurrency } from '../utils/format';
@@ -53,6 +54,8 @@ export function DashboardPage({ state }: DashboardPageProps) {
   const budgetStatuses = useMemo(() => getBudgetStatus(state, year, month), [state, year, month]);
   const subs = useMemo(() => detectSubscriptions(state.transactions), [state.transactions]);
   const insights = useMemo(() => generateInsights(state), [state]);
+  const upcoming30 = useMemo(() => projectRecurring(state, 30), [state]);
+  const upcomingByWeek = useMemo(() => groupUpcomingByWeek(upcoming30), [upcoming30]);
 
   const budgetedByCategory = useMemo(() => {
     const map: Record<string, number> = {};
@@ -128,6 +131,55 @@ export function DashboardPage({ state }: DashboardPageProps) {
           footer={savingsRate >= 20 ? 'Healthy' : savingsRate > 0 ? 'Keep building' : 'No savings this month'}
         />
       </View>
+
+      <Card title="Upcoming in the next 30 days" eyebrow="Projected from recurring patterns">
+        {upcoming30.length === 0 ? (
+          <Text style={{ color: palette.textSubtle, fontSize: typography.small }}>
+            No recurring bills or paychecks detected yet — add a few similar-dated rows for the same payee.
+          </Text>
+        ) : (
+          <View style={{ gap: spacing.lg }}>
+            {upcomingByWeek.map((week) => (
+              <View key={week.weekKey}>
+                <View style={styles.weekHeader}>
+                  <Text style={[styles.weekTitle, { color: palette.text }]}>{week.label}</Text>
+                  <Text style={[styles.weekTotals, { color: palette.textMuted }]}>
+                    Out {formatCurrency(week.outflow)} · In {formatCurrency(week.inflow)}
+                  </Text>
+                </View>
+                <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
+                  {week.items.map((item) => (
+                    <View
+                      key={`${item.date}-${item.payee}-${item.kind}`}
+                      style={[
+                        styles.upcomingRow,
+                        { backgroundColor: palette.surfaceSunken, borderColor: palette.borderSoft },
+                      ]}
+                    >
+                      <Text style={{ fontSize: 14 }}>{item.kind === 'charge' ? '🔴' : '🟢'}</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.mName, { color: palette.text }]}>{item.payee}</Text>
+                        <Text style={[styles.mCount, { color: palette.textSubtle }]}>
+                          {item.date} · {item.frequency}
+                        </Text>
+                      </View>
+                      <Text
+                        style={[
+                          styles.mAmt,
+                          { color: item.kind === 'income' ? palette.success : palette.text },
+                        ]}
+                      >
+                        {item.amount >= 0 ? '+' : ''}
+                        {formatCurrency(item.amount)}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+      </Card>
 
       <View style={styles.twoCol}>
         <Card title="Income vs spend" eyebrow="Last 6 months" style={styles.flex2}>
@@ -279,6 +331,57 @@ export function DashboardPage({ state }: DashboardPageProps) {
   );
 }
 
+function startOfWeekMonday(d: Date): Date {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const day = x.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  x.setDate(x.getDate() + diff);
+  return x;
+}
+
+function weekKeyFromDate(isoDate: string): string {
+  const d = new Date(`${isoDate}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return isoDate;
+  const s = startOfWeekMonday(d);
+  return `${s.getFullYear()}-${`${s.getMonth() + 1}`.padStart(2, '0')}-${`${s.getDate()}`.padStart(2, '0')}`;
+}
+
+function groupUpcomingByWeek(items: ProjectedRecurringItem[]): {
+  weekKey: string;
+  label: string;
+  outflow: number;
+  inflow: number;
+  items: ProjectedRecurringItem[];
+}[] {
+  const map = new Map<string, ProjectedRecurringItem[]>();
+  for (const item of items) {
+    const wk = weekKeyFromDate(item.date);
+    if (!map.has(wk)) map.set(wk, []);
+    map.get(wk)!.push(item);
+  }
+  const rows = [...map.entries()]
+    .map(([weekKey, list]) => {
+      const sorted = [...list].sort((a, b) => a.date.localeCompare(b.date));
+      const start = new Date(`${weekKey}T12:00:00`);
+      const label = `Week of ${start.toLocaleString('default', { month: 'short', day: 'numeric' })}`;
+      let outflow = 0;
+      let inflow = 0;
+      for (const it of sorted) {
+        if (it.kind === 'charge') outflow += Math.abs(it.amount);
+        else inflow += Math.abs(it.amount);
+      }
+      return {
+        weekKey,
+        label,
+        outflow: Number(outflow.toFixed(2)),
+        inflow: Number(inflow.toFixed(2)),
+        items: sorted,
+      };
+    })
+    .sort((a, b) => a.weekKey.localeCompare(b.weekKey));
+  return rows;
+}
+
 const styles = StyleSheet.create({
   eyebrow: {
     fontSize: typography.micro,
@@ -375,5 +478,22 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 1,
     padding: spacing.md,
+  },
+  weekHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  weekTitle: { fontSize: typography.small, fontWeight: '800' },
+  weekTotals: { fontSize: typography.micro, fontWeight: '600' },
+  upcomingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
   },
 });
