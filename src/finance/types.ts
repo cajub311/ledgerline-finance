@@ -40,6 +40,10 @@ export interface Budget {
   category: string;
   monthlyLimit: number;
   createdAt: string;
+  /** When true, surplus from prior months carries into the next month; when false, surplus is dropped but overspend (debt) still carries. */
+  rollover: boolean;
+  /** Optional starting envelope balance when the budget was created (surplus or debt from before tracking). */
+  carry?: number;
 }
 
 export interface FinancialGoal {
@@ -51,9 +55,13 @@ export interface FinancialGoal {
   createdAt: string;
 }
 
+export type BudgetsViewMode = 'flow' | 'envelope';
+
 export interface FinancePreferences {
   /** Balance threshold for cash-flow forecast warnings; 0 disables highlights */
   forecastLowBalanceThreshold: number;
+  /** Flow = limit vs spend this month only; envelope = zero-based with carry/rollover. */
+  budgetsViewMode: BudgetsViewMode;
 }
 
 export interface FinanceState {
@@ -136,6 +144,17 @@ export interface BudgetStatus {
   limit: number;
   spent: number;
   pct: number;
+  status: 'ok' | 'warning' | 'over';
+}
+
+/** Per-budget envelope figures for a calendar month (YNAB-style). */
+export interface BudgetEnvelope {
+  budgetId: string;
+  category: string;
+  assigned: number;
+  carriedIn: number;
+  spent: number;
+  available: number;
   status: 'ok' | 'warning' | 'over';
 }
 

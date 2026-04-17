@@ -1,7 +1,8 @@
 {
   "householdName": "Ledgerline",
   "preferences": {
-    "forecastLowBalanceThreshold": 500
+    "forecastLowBalanceThreshold": 500,
+    "budgetsViewMode": "flow"
   },
   "accounts": [
     {
@@ -161,11 +162,11 @@
     }
   ],
   "budgets": [
-    { "id": "bgt-001", "category": "Groceries", "monthlyLimit": 400, "createdAt": "2026-01-01T00:00:00.000Z" },
-    { "id": "bgt-002", "category": "Dining", "monthlyLimit": 150, "createdAt": "2026-01-01T00:00:00.000Z" },
-    { "id": "bgt-003", "category": "Subscriptions", "monthlyLimit": 100, "createdAt": "2026-01-01T00:00:00.000Z" },
-    { "id": "bgt-004", "category": "Shopping", "monthlyLimit": 200, "createdAt": "2026-01-01T00:00:00.000Z" },
-    { "id": "bgt-005", "category": "Fuel", "monthlyLimit": 120, "createdAt": "2026-01-01T00:00:00.000Z" }
+    { "id": "bgt-001", "category": "Groceries", "monthlyLimit": 400, "createdAt": "2026-01-01T00:00:00.000Z", "rollover": true },
+    { "id": "bgt-002", "category": "Dining", "monthlyLimit": 150, "createdAt": "2026-01-01T00:00:00.000Z", "rollover": true },
+    { "id": "bgt-003", "category": "Subscriptions", "monthlyLimit": 100, "createdAt": "2026-01-01T00:00:00.000Z", "rollover": true },
+    { "id": "bgt-004", "category": "Shopping", "monthlyLimit": 200, "createdAt": "2026-01-01T00:00:00.000Z", "rollover": true },
+    { "id": "bgt-005", "category": "Fuel", "monthlyLimit": 120, "createdAt": "2026-01-01T00:00:00.000Z", "rollover": true }
   ],
   "goals": [
     {
