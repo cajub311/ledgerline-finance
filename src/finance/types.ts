@@ -56,6 +56,20 @@ export interface FinancePreferences {
   forecastLowBalanceThreshold: number;
 }
 
+/** User-defined auto-categorization rule; first matching rule in `FinanceState.rules` wins. */
+export interface FinanceRule {
+  id: string;
+  category: string;
+  /** Optional payee regex (case-insensitive flags); empty/omitted matches any payee. */
+  payeePattern?: string;
+  /** When set, only applies to transactions on this account. */
+  accountId?: string;
+  /** Inclusive lower bound on signed `amount` (same units as transactions). */
+  amountMin?: number;
+  /** Inclusive upper bound on signed `amount`. */
+  amountMax?: number;
+}
+
 export interface FinanceState {
   version: 1;
   householdName: string;
@@ -65,6 +79,8 @@ export interface FinanceState {
   imports: ImportRecord[];
   budgets: Budget[];
   goals: FinancialGoal[];
+  /** Ordered rules; earlier entries take precedence over later ones. */
+  rules: FinanceRule[];
   preferences: FinancePreferences;
 }
 
