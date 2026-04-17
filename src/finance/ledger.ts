@@ -295,6 +295,50 @@ export function deleteTransaction(state: FinanceState, transactionId: string): F
   };
 }
 
+export function deleteTransactions(state: FinanceState, transactionIds: string[]): FinanceState {
+  if (transactionIds.length === 0) return state;
+  const set = new Set(transactionIds);
+  return {
+    ...state,
+    transactions: state.transactions.filter((transaction) => !set.has(transaction.id)),
+  };
+}
+
+export function setTransactionsReviewed(
+  state: FinanceState,
+  transactionIds: string[],
+  reviewed: boolean,
+): FinanceState {
+  if (transactionIds.length === 0) return state;
+  const set = new Set(transactionIds);
+  return {
+    ...state,
+    transactions: state.transactions.map((transaction) =>
+      set.has(transaction.id) ? { ...transaction, reviewed } : transaction,
+    ),
+  };
+}
+
+export function setTransactionsCategory(
+  state: FinanceState,
+  transactionIds: string[],
+  category: string,
+): FinanceState {
+  if (transactionIds.length === 0) return state;
+  const set = new Set(transactionIds);
+  return {
+    ...state,
+    transactions: state.transactions.map((transaction) =>
+      set.has(transaction.id)
+        ? {
+            ...transaction,
+            category: normalizeCategory(category, transaction.payee),
+          }
+        : transaction,
+    ),
+  };
+}
+
 export function addAccount(
   state: FinanceState,
   draft: Omit<FinanceAccount, 'id' | 'lastSynced' | 'source'> & {
