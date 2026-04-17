@@ -233,6 +233,85 @@ export function updateTransactionCategory(
   };
 }
 
+export interface TransactionPatch {
+  date?: string;
+  payee?: string;
+  amount?: number;
+  category?: string;
+  accountId?: string;
+  notes?: string;
+  reviewed?: boolean;
+}
+
+export function updateTransaction(
+  state: FinanceState,
+  transactionId: string,
+  patch: TransactionPatch,
+): FinanceState {
+  return {
+    ...state,
+    transactions: state.transactions.map((transaction) => {
+      if (transaction.id !== transactionId) return transaction;
+      const merged: FinanceTransaction = {
+        ...transaction,
+        ...patch,
+        category:
+          patch.category !== undefined
+            ? normalizeCategory(patch.category, patch.payee ?? transaction.payee)
+            : transaction.category,
+      };
+      return normalizeTransaction(merged);
+    }),
+  };
+}
+
+export function deleteTransaction(state: FinanceState, transactionId: string): FinanceState {
+  return {
+    ...state,
+    transactions: state.transactions.filter((transaction) => transaction.id !== transactionId),
+  };
+}
+
+export function addAccount(
+  state: FinanceState,
+  draft: Omit<FinanceAccount, 'id' | 'lastSynced' | 'source'> & {
+    source?: FinanceAccount['source'];
+  },
+): FinanceState {
+  const account: FinanceAccount = {
+    id: createId('acct'),
+    name: draft.name.trim() || 'Untitled account',
+    institution: draft.institution.trim() || 'Manual',
+    type: draft.type,
+    source: draft.source ?? 'manual',
+    openingBalance: Number.isFinite(draft.openingBalance) ? draft.openingBalance : 0,
+    lastSynced: new Date().toISOString().slice(0, 10),
+    notes: draft.notes?.trim() || undefined,
+  };
+  return { ...state, accounts: [...state.accounts, account] };
+}
+
+export function updateAccount(
+  state: FinanceState,
+  accountId: string,
+  patch: Partial<Omit<FinanceAccount, 'id'>>,
+): FinanceState {
+  return {
+    ...state,
+    accounts: state.accounts.map((account) =>
+      account.id === accountId ? { ...account, ...patch } : account,
+    ),
+  };
+}
+
+export function deleteAccount(state: FinanceState, accountId: string): FinanceState {
+  return {
+    ...state,
+    accounts: state.accounts.filter((account) => account.id !== accountId),
+    transactions: state.transactions.filter((transaction) => transaction.accountId !== accountId),
+  };
+}
+
 function mapImportedRowToTransaction(
   row: ParsedStatementRow,
   accountId: string,

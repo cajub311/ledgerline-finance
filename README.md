@@ -1,14 +1,18 @@
 # Ledgerline Finance
 
-Local-first finance workspace built with Expo, React Native, and TypeScript.
+Local-first personal finance workspace built with Expo, React Native Web, and TypeScript.
 
-It is designed around a statement inbox first:
+Everything is organized into focused tabs:
 
-- Import Wells Fargo PDFs, CSV exports, and spreadsheet files on web.
-- Paste statement text on any device as a fallback.
-- Review transactions, recategorize them, and mark them reviewed.
-- Keep the state serializable with AsyncStorage so the ledger survives app restarts (saves are debounced so typing does not write on every keystroke).
-- On web, **Export backup** downloads the full ledger as JSON; **Import backup** restores it (useful for moving between browsers or recovering from a bad import).
+- **Dashboard** — net worth, cash flow, savings rate, 6-month income/spend trend, category breakdown, top merchants, detected subscriptions, and automatic insights.
+- **Transactions** — searchable, filterable ledger with inline edit, delete, and review. Filter by account, category, income/expense, or unreviewed.
+- **Budgets** — per-category monthly limits with live status (on track / close / over) and suggestions for unbudgeted spending.
+- **Goals** — savings targets with progress bars, days remaining, and the monthly save rate required to hit each target on time.
+- **Accounts** — add / edit / delete any combination of checking, savings, credit, cash, loan, or investment accounts.
+- **Import** — upload CSV, XLSX, or PDF statements from any bank (headers detected automatically), paste text, or export/restore a full JSON backup.
+- **Settings** — switch between light and dark mode, rename your household, and reset to demo data.
+
+The app is 100% client-side: transactions live in your browser (AsyncStorage / localStorage). Saves are debounced so typing does not write on every keystroke.
 
 ## Requirements
 
@@ -66,12 +70,15 @@ vercel deploy -y --no-wait
 
 ## Main files
 
-- `src/FinanceApp.tsx` - finance workspace UI
-- `src/components/finance/ImportHubSection.tsx` - import hub (statements, backup, paste)
-- `src/finance/backup.ts` - JSON backup serialize/parse
-- `public/index.html` - web template (includes `<link rel="manifest">`; do not use a `src/app` folder here — Expo treats it as Expo Router and would change the bundle)
-- `src/finance/ledger.ts` - state transitions, summaries, and import application
-- `src/finance/import.shared.ts` - CSV and statement-text parsing
-- `src/finance/import.web.ts` - web file import and PDF/XLSX parsing
-- `src/finance/storage.ts` - AsyncStorage persistence
+- `src/FinanceApp.tsx` — app shell, tab routing, responsive sidebar
+- `src/theme/` — design tokens (colors, spacing, typography) and light/dark ThemeProvider
+- `src/pages/` — one file per tab: `DashboardPage.tsx`, `TransactionsPage.tsx`, `BudgetsPage.tsx`, `GoalsPage.tsx`, `AccountsPage.tsx`, `ImportPage.tsx`, `SettingsPage.tsx`
+- `src/components/ui/` — reusable primitives (Button, Card, Input, Modal, Select, StatTile, Badge)
+- `src/components/charts/` — BarChart (income/spend), CategoryBreakdownList, Sparkline
+- `src/components/layout/Sidebar.tsx` — sidebar on wide screens, top pill bar on narrow
+- `src/finance/ledger.ts` — all state transitions including `updateTransaction`, `deleteTransaction`, `addAccount`, `updateAccount`, `deleteAccount`, budgets, goals, insights, subscription detection
+- `src/finance/import.shared.ts` / `import.web.ts` — CSV / XLSX / PDF parsing with header-alias detection (works with any bank, not just one)
+- `src/finance/backup.ts` — JSON backup serialize/parse
+- `src/finance/storage.ts` — AsyncStorage persistence (debounced via `useDebouncedFinancePersistence`)
+- `public/index.html` — web template (do not use a `src/app` folder here — Expo treats it as Expo Router)
 
