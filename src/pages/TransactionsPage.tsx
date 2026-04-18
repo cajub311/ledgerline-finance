@@ -13,10 +13,13 @@ import {
   deleteTransaction,
   deleteTransactions,
   getAccountsWithBalances,
+  getAllTags,
   getCategoryIcon,
   getCategoryOptions,
+  normalizeTag,
   setTransactionsCategory,
   setTransactionsReviewed,
+  setTransactionsTags,
   toggleTransactionReview,
   updateTransaction,
 } from '../finance/ledger';
@@ -41,6 +44,8 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
   const [filter, setFilter] = useState<FilterTab>('all');
   const [accountFilter, setAccountFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [tagFilter, setTagFilter] = useState<string>('all');
+  const allTags = useMemo(() => getAllTags(state), [state]);
 
   const [showAdd, setShowAdd] = useState(false);
   const [addDate, setAddDate] = useState(() => formatIsoDate());
@@ -53,6 +58,7 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
   const [editing, setEditing] = useState<FinanceTransaction | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set<string>());
   const [bulkCategory, setBulkCategory] = useState<string>('Other');
+  const [bulkTagDraft, setBulkTagDraft] = useState('');
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -60,17 +66,18 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
       .filter((tx) => {
         if (accountFilter !== 'all' && tx.accountId !== accountFilter) return false;
         if (categoryFilter !== 'all' && tx.category !== categoryFilter) return false;
+        if (tagFilter !== 'all' && !(tx.tags ?? []).includes(tagFilter)) return false;
         if (filter === 'unreviewed' && tx.reviewed) return false;
         if (filter === 'income' && tx.amount <= 0) return false;
         if (filter === 'expense' && tx.amount >= 0) return false;
         if (q) {
-          const hay = `${tx.payee} ${tx.category} ${tx.notes ?? ''}`.toLowerCase();
+          const hay = `${tx.payee} ${tx.category} ${tx.notes ?? ''} ${(tx.tags ?? []).join(' ')}`.toLowerCase();
           if (!hay.includes(q)) return false;
         }
         return true;
       })
       .sort((a, b) => b.date.localeCompare(a.date));
-  }, [state.transactions, query, filter, accountFilter, categoryFilter]);
+  }, [state.transactions, query, filter, accountFilter, categoryFilter, tagFilter]);
 
   const totals = useMemo(() => {
     let income = 0;
@@ -130,6 +137,18 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
   const bulkRecategorize = () => {
     if (selectedIds.size === 0) return;
     onStateChange(setTransactionsCategory(state, Array.from(selectedIds), bulkCategory));
+    clearSelection();
+  };
+
+  const applyBulkTags = (mode: 'merge' | 'remove') => {
+    if (selectedIds.size === 0) return;
+    const tokens = bulkTagDraft
+      .split(/[\s,]+/)
+      .map((t) => normalizeTag(t))
+      .filter((t): t is string => Boolean(t));
+    if (tokens.length === 0) return;
+    onStateChange(setTransactionsTags(state, Array.from(selectedIds), tokens, mode));
+    setBulkTagDraft('');
     clearSelection();
   };
 
@@ -207,6 +226,28 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
               />
             </View>
             <Button label="Apply" size="sm" variant="primary" onPress={bulkRecategorize} />
+            <View style={{ minWidth: 160, flexDirection: 'row', gap: 4 }}>
+              <Input
+                value={bulkTagDraft}
+                onChangeText={setBulkTagDraft}
+                placeholder="tag1, tag2"
+                style={{ flex: 1 }}
+              />
+            </View>
+            <Button
+              label="Add tags"
+              size="sm"
+              variant="secondary"
+              onPress={() => applyBulkTags('merge')}
+              disabled={!bulkTagDraft.trim()}
+            />
+            <Button
+              label="Remove tags"
+              size="sm"
+              variant="ghost"
+              onPress={() => applyBulkTags('remove')}
+              disabled={!bulkTagDraft.trim()}
+            />
             <Button label="Delete" size="sm" variant="danger" onPress={bulkDelete} />
             <Button label="Clear" size="sm" variant="ghost" onPress={clearSelection} />
           </View>
@@ -248,6 +289,20 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
               ...categoryOptions.map((c) => ({ value: c, label: c, icon: getCategoryIcon(c) })),
             ]}
           />
+          {allTags.length > 0 ? (
+            <Select
+              label="Tag"
+              value={tagFilter}
+              onChange={setTagFilter}
+              options={[
+                { value: 'all', label: 'Any tag' },
+                ...allTags.map(({ tag, count }) => ({
+                  value: tag,
+                  label: `#${tag} (${count})`,
+                })),
+              ]}
+            />
+          ) : null}
         </View>
       </Card>
 
@@ -348,6 +403,33 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
                     <View style={styles.topLine}>
                       <Text style={[styles.payee, { color: palette.text }]}>{tx.payee}</Text>
                       {!tx.reviewed ? <Badge label="To review" tone="warning" /> : null}
+                      {(tx.tags ?? []).map((t) => (
+                        <Pressable
+                          key={t}
+                          onPress={() => setTagFilter(t)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Filter by tag ${t}`}
+                          style={[
+                            styles.tagChip,
+                            {
+                              backgroundColor:
+                                tagFilter === t ? palette.primary : palette.surfaceSunken,
+                              borderColor:
+                                tagFilter === t ? palette.primary : palette.borderSoft,
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={{
+                              color: tagFilter === t ? palette.primaryText : palette.textMuted,
+                              fontSize: typography.micro,
+                              fontWeight: '700',
+                            }}
+                          >
+                            #{t}
+                          </Text>
+                        </Pressable>
+                      ))}
                     </View>
                     <Text style={[styles.meta, { color: palette.textSubtle }]}>
                       {tx.date} · {tx.category} · {account?.name ?? '—'}
@@ -451,6 +533,7 @@ function EditTransactionModal({ transaction, state, onClose, onSave, onToggleRev
   const [category, setCategory] = useState('Other');
   const [accountId, setAccountId] = useState('');
   const [notes, setNotes] = useState('');
+  const [tagsDraft, setTagsDraft] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
@@ -461,11 +544,29 @@ function EditTransactionModal({ transaction, state, onClose, onSave, onToggleRev
       setCategory(transaction.category);
       setAccountId(transaction.accountId);
       setNotes(transaction.notes ?? '');
+      setTagsDraft((transaction.tags ?? []).join(' '));
       setConfirmDelete(false);
     }
   }, [transaction]);
 
+  const allTags = useMemo(() => getAllTags(state), [state]);
+
   if (!transaction) return null;
+
+  const parsedTags = tagsDraft
+    .split(/[\s,]+/)
+    .map((t) => normalizeTag(t))
+    .filter((t): t is string => Boolean(t));
+
+  const suggestedTags = allTags
+    .map((entry) => entry.tag)
+    .filter((t) => !parsedTags.includes(t))
+    .slice(0, 8);
+
+  const addTagToDraft = (tag: string) => {
+    const next = [...parsedTags, tag].join(' ');
+    setTagsDraft(next);
+  };
 
   const save = () => {
     const numeric = Number.parseFloat(amount);
@@ -476,6 +577,7 @@ function EditTransactionModal({ transaction, state, onClose, onSave, onToggleRev
       category,
       accountId,
       notes: notes.trim() || undefined,
+      tags: parsedTags,
     });
   };
 
@@ -523,6 +625,38 @@ function EditTransactionModal({ transaction, state, onClose, onSave, onToggleRev
         />
       </ScrollView>
       <Input label="Notes" value={notes} onChangeText={setNotes} />
+      <Input
+        label="Tags (space or comma separated)"
+        value={tagsDraft}
+        onChangeText={setTagsDraft}
+        placeholder="trip-2026 tax reimbursable"
+      />
+      {suggestedTags.length > 0 ? (
+        <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+          <Text style={{ color: palette.textSubtle, fontSize: typography.micro, marginRight: 4 }}>
+            Add existing:
+          </Text>
+          {suggestedTags.map((t) => (
+            <Pressable
+              key={t}
+              onPress={() => addTagToDraft(t)}
+              accessibilityRole="button"
+              accessibilityLabel={`Add tag ${t}`}
+              style={[
+                styles.tagChip,
+                {
+                  backgroundColor: palette.surfaceSunken,
+                  borderColor: palette.borderSoft,
+                },
+              ]}
+            >
+              <Text style={{ color: palette.textMuted, fontSize: typography.micro, fontWeight: '700' }}>
+                #{t}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
       {confirmDelete ? (
         <Text style={{ color: palette.danger, fontSize: typography.small }}>
           Click Confirm delete to remove this transaction permanently.
@@ -608,5 +742,11 @@ const styles = StyleSheet.create({
     fontSize: typography.micro,
     textAlign: 'center',
     padding: spacing.md,
+  },
+  tagChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+    borderWidth: 1,
   },
 });
