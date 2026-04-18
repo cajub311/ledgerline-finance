@@ -17,6 +17,10 @@ interface ButtonProps {
   trailing?: ReactNode;
   style?: ViewStyle;
   fullWidth?: boolean;
+  /** Overrides the default accessibilityLabel (which is the visible label). */
+  accessibilityLabel?: string;
+  /** Optional longer description for screen readers. */
+  accessibilityHint?: string;
 }
 
 export function Button({
@@ -29,6 +33,8 @@ export function Button({
   trailing,
   style,
   fullWidth,
+  accessibilityLabel,
+  accessibilityHint,
 }: ButtonProps) {
   const { palette } = useTheme();
 
@@ -62,6 +68,9 @@ export function Button({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={{ disabled: Boolean(disabled) }}
       onPress={disabled ? undefined : onPress}
       disabled={disabled}
       style={({ pressed, hovered }) => [

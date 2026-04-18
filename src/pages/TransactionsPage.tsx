@@ -353,6 +353,11 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
               return (
                 <Pressable
                   key={tx.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${tx.payee}, ${formatCurrency(tx.amount)}, ${tx.date}, ${
+                    account?.name ?? 'unknown account'
+                  }, ${tx.category}${tx.reviewed ? '' : ', to review'}`}
+                  accessibilityHint="Opens editor. Long press to multi-select."
                   onPress={() => {
                     if (selectedIds.size > 0) {
                       toggleSelect(tx.id);
