@@ -7,8 +7,10 @@ import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
 import {
+  createEmptyFinanceState,
   createFinanceState,
   getCategoryOptions,
+  isSeedState,
   reapplyRulesToAllTransactions,
 } from '../finance/ledger';
 import {
@@ -33,6 +35,8 @@ export function SettingsPage({ state, onStateChange }: SettingsPageProps) {
   const { palette, mode, setMode } = useTheme();
   const [householdDraft, setHouseholdDraft] = useState(state.householdName);
   const [confirm, setConfirm] = useState(false);
+  const [wipeConfirm, setWipeConfirm] = useState(false);
+  const showingDemoData = useMemo(() => isSeedState(state), [state]);
   const [ruleEditorOpen, setRuleEditorOpen] = useState(false);
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [ruleDraft, setRuleDraft] = useState<RuleDraft>(emptyRuleDraft());
@@ -56,6 +60,20 @@ export function SettingsPage({ state, onStateChange }: SettingsPageProps) {
     }
     onStateChange(createFinanceState());
     setConfirm(false);
+  };
+
+  const startFresh = async () => {
+    if (!wipeConfirm) {
+      setWipeConfirm(true);
+      return;
+    }
+    try {
+      await clearFinanceState();
+    } catch {
+      // ignore
+    }
+    onStateChange(createEmptyFinanceState({ householdName: state.householdName }));
+    setWipeConfirm(false);
   };
 
   const totals = {
@@ -368,14 +386,42 @@ export function SettingsPage({ state, onStateChange }: SettingsPageProps) {
         </Text>
       </Card>
 
-      <Card title="Danger zone" eyebrow="Reset">
+      <Card
+        title="Start fresh"
+        eyebrow={showingDemoData ? 'You are on demo data' : 'Wipe & start clean'}
+      >
         <Text style={{ color: palette.textMuted, fontSize: typography.small, lineHeight: 19 }}>
-          Clear all accounts, transactions, budgets, and goals. This returns the app to the seeded
-          demo data. Export a backup first if you want to keep your records.
+          Deletes every demo account, transaction, budget, goal, rule, and import record and
+          leaves you with a single empty "Primary checking" account. This is the right option
+          when you want to track your real data without any of the seeded examples mixing in.
+          {'\n\n'}Export a JSON backup from the Import tab first if there's anything here you
+          want to keep.
+        </Text>
+        <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
+          <Button
+            label={wipeConfirm ? 'Tap again to wipe everything' : 'Start fresh (wipe all data)'}
+            variant="danger"
+            onPress={startFresh}
+            accessibilityHint="Clears all demo and imported data and leaves one empty account"
+          />
+          {wipeConfirm ? (
+            <Button
+              label="Cancel"
+              variant="ghost"
+              onPress={() => setWipeConfirm(false)}
+            />
+          ) : null}
+        </View>
+      </Card>
+
+      <Card title="Reload demo data" eyebrow="Show the examples again">
+        <Text style={{ color: palette.textMuted, fontSize: typography.small, lineHeight: 19 }}>
+          Replaces your current ledger with the shipped demo accounts, transactions, budgets, and
+          goals. Useful if you want to see the examples again after wiping.
         </Text>
         <Button
-          label={confirm ? 'Click again to confirm reset' : 'Reset ledger to demo data'}
-          variant="danger"
+          label={confirm ? 'Tap again to reload demo data' : 'Reload demo data'}
+          variant="secondary"
           onPress={reset}
         />
       </Card>

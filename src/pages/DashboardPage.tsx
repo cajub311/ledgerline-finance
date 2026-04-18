@@ -2,12 +2,14 @@ import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Badge } from '../components/ui/Badge';
+import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { StatTile } from '../components/ui/StatTile';
 import { IncomeSpendBars } from '../components/charts/BarChart';
 import { CategoryBreakdownList } from '../components/charts/CategoryBreakdownList';
 import { NetWorthLineChart } from '../components/charts/NetWorthLineChart';
 import {
+  createEmptyFinanceState,
   detectSubscriptions,
   generateInsights,
   getAccountsWithBalances,
@@ -23,8 +25,10 @@ import {
   getSafeToSpend,
   getSavingsRate,
   getTopMerchants,
+  isSeedState,
   projectRecurring,
 } from '../finance/ledger';
+import { clearFinanceState } from '../finance/storage';
 import type { FinanceState, ProjectedRecurringItem } from '../finance/types';
 import { useTheme } from '../theme/ThemeContext';
 import { elevation, radius, spacing, typography } from '../theme/tokens';
@@ -32,12 +36,29 @@ import { formatCurrency } from '../utils/format';
 
 interface DashboardPageProps {
   state: FinanceState;
+  onStateChange?: (next: FinanceState) => void;
 }
 
 type NetWorthHorizon = 3 | 6 | 12 | 0;
 
-export function DashboardPage({ state }: DashboardPageProps) {
+export function DashboardPage({ state, onStateChange }: DashboardPageProps) {
   const { palette, mode } = useTheme();
+  const [wipeConfirm, setWipeConfirm] = useState(false);
+  const onDemoData = useMemo(() => isSeedState(state), [state]);
+
+  const startFresh = async () => {
+    if (!wipeConfirm) {
+      setWipeConfirm(true);
+      return;
+    }
+    try {
+      await clearFinanceState();
+    } catch {
+      // ignore
+    }
+    onStateChange?.(createEmptyFinanceState({ householdName: state.householdName }));
+    setWipeConfirm(false);
+  };
   const summary = useMemo(() => getFinanceSummary(state), [state]);
   const savingsRate = useMemo(() => getSavingsRate(state), [state]);
   const trend = useMemo(() => getMonthlyTrend(state.transactions, 6), [state.transactions]);
@@ -121,6 +142,39 @@ export function DashboardPage({ state }: DashboardPageProps) {
 
   return (
     <View style={{ gap: spacing.lg }}>
+      {onDemoData ? (
+        <View
+          style={[
+            styles.demoBanner,
+            {
+              backgroundColor: palette.warningSoft,
+              borderColor: palette.warning,
+            },
+          ]}
+        >
+          <View style={{ flex: 1, minWidth: 220 }}>
+            <Text style={[styles.demoBannerTitle, { color: palette.warning }]}>
+              You're viewing demo data
+            </Text>
+            <Text style={[styles.demoBannerBody, { color: palette.textMuted }]}>
+              These accounts and transactions are examples shipped with the app. Wipe them any
+              time to start fresh with your own data — importing on top keeps the demo mixed in.
+            </Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
+            <Button
+              label={wipeConfirm ? 'Tap again to confirm' : 'Start fresh'}
+              variant="primary"
+              onPress={startFresh}
+              accessibilityHint="Wipes demo data and leaves one empty checking account"
+            />
+            {wipeConfirm ? (
+              <Button label="Cancel" variant="ghost" onPress={() => setWipeConfirm(false)} />
+            ) : null}
+          </View>
+        </View>
+      ) : null}
+
       <View
         style={[
           styles.hero,
@@ -494,6 +548,26 @@ export function DashboardPage({ state }: DashboardPageProps) {
 }
 
 const styles = StyleSheet.create({
+  demoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    flexWrap: 'wrap',
+  },
+  demoBannerTitle: {
+    fontSize: typography.small,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  demoBannerBody: {
+    fontSize: typography.small,
+    lineHeight: 19,
+    marginTop: 4,
+  },
   hero: {
     padding: spacing.xxl,
     borderRadius: radius.xl,

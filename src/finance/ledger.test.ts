@@ -6,6 +6,7 @@ import type { Budget, FinanceAccount, FinanceState, FinanceTransaction } from '.
 import {
   addManualTransaction,
   applyImportedBatch,
+  createEmptyFinanceState,
   createFinanceState,
   getAllTags,
   getBudgetEnvelopes,
@@ -13,6 +14,7 @@ import {
   getFinanceSummary,
   getNetWorthSeries,
   getSafeToSpend,
+  isSeedState,
   normalizeTag,
   normalizeTags,
   patchBudget,
@@ -524,4 +526,36 @@ test('getAllTags counts by usage desc', () => {
   assert.equal(all[0].count, 3);
   assert.equal(all[1].tag, 'tax');
   assert.equal(all[1].count, 1);
+});
+
+test('createEmptyFinanceState returns a blank ledger with a single placeholder account', () => {
+  const state = createEmptyFinanceState();
+  assert.equal(state.transactions.length, 0);
+  assert.equal(state.imports.length, 0);
+  assert.equal(state.budgets.length, 0);
+  assert.equal(state.goals.length, 0);
+  assert.equal(state.rules.length, 0);
+  assert.equal(state.accounts.length, 1);
+  assert.equal(state.accounts[0].type, 'checking');
+  assert.equal(state.accounts[0].source, 'manual');
+});
+
+test('isSeedState is true for the factory seed and false after a user manual tx', () => {
+  const seed = createFinanceState();
+  assert.equal(isSeedState(seed), true);
+
+  const afterManual = addManualTransaction(seed, {
+    accountId: seed.accounts[0].id,
+    date: '2026-04-20',
+    payee: 'Test Merchant',
+    amount: '-12.50',
+    category: 'Other',
+    notes: '',
+  });
+  assert.equal(isSeedState(afterManual), false);
+});
+
+test('isSeedState is false for a blank ledger', () => {
+  const fresh = createEmptyFinanceState();
+  assert.equal(isSeedState(fresh), false);
 });

@@ -15,11 +15,13 @@ import { Sidebar, type NavItem, type SidebarSummary } from './components/layout/
 import { buildTransactionsCsv } from './finance/export';
 import { serializeFinanceState } from './finance/backup';
 import {
+  createEmptyFinanceState,
   createFinanceState,
   getFinanceSummary,
   getMonthlyTrend,
   rehydrateFinanceState,
 } from './finance/ledger';
+import { clearFinanceState } from './finance/storage';
 import type { FinanceState } from './finance/types';
 import { loadFinanceState } from './finance/storage';
 import { useDebouncedFinancePersistence } from './hooks/useDebouncedFinancePersistence';
@@ -151,8 +153,29 @@ function AppShell() {
       }
     };
 
+    const startFresh = async () => {
+      try {
+        await clearFinanceState();
+      } catch {
+        // ignore
+      }
+      setState(createEmptyFinanceState({ householdName: state.householdName }));
+      setActiveTab('dashboard');
+    };
+
     return [
       ...navActions,
+      {
+        id: 'start-fresh',
+        label: 'Start fresh (wipe all data)',
+        hint: 'Replaces demo or current data with an empty ledger',
+        icon: '🧹',
+        section: 'Tools',
+        keywords: ['reset', 'wipe', 'clear', 'blank', 'empty', 'fresh'],
+        run: () => {
+          void startFresh();
+        },
+      },
       {
         id: 'toggle-theme',
         label: mode === 'dark' ? 'Switch to light theme' : 'Switch to dark theme',
@@ -281,7 +304,7 @@ function PageBody({
 }) {
   switch (tab) {
     case 'dashboard':
-      return <DashboardPage state={state} />;
+      return <DashboardPage state={state} onStateChange={onStateChange} />;
     case 'transactions':
       return <TransactionsPage state={state} onStateChange={onStateChange} />;
     case 'budgets':

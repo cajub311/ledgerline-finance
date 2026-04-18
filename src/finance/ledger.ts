@@ -658,6 +658,64 @@ export function resetFinanceState(): FinanceState {
   return createFinanceState();
 }
 
+/** Stable IDs that ship with the demo seed; used by isSeedState(). */
+const SEED_ACCOUNT_IDS: Set<string> = new Set(
+  (seedData.accounts as FinanceAccount[]).map((a) => a.id),
+);
+const SEED_TRANSACTION_IDS: Set<string> = new Set(
+  (seedData.transactions as FinanceTransaction[]).map((t) => t.id),
+);
+
+/**
+ * Returns true when the state still looks like the factory-shipped demo data,
+ * so the UI can warn users that what they see is not their real ledger.
+ *
+ * Heuristic: the set of account ids and transaction ids exactly matches what
+ * the seed JSON shipped. As soon as the user adds, deletes, or imports a
+ * single row, this flips to false and we stop warning.
+ */
+export function isSeedState(state: FinanceState): boolean {
+  if (state.accounts.length !== SEED_ACCOUNT_IDS.size) return false;
+  for (const account of state.accounts) {
+    if (!SEED_ACCOUNT_IDS.has(account.id)) return false;
+  }
+  if (state.transactions.length !== SEED_TRANSACTION_IDS.size) return false;
+  for (const tx of state.transactions) {
+    if (!SEED_TRANSACTION_IDS.has(tx.id)) return false;
+  }
+  return true;
+}
+
+/**
+ * Produces a blank ledger with a single placeholder checking account — good
+ * for first-time users who want to put in their own data without any demo
+ * rows getting mixed in. Preferences are kept at their defaults.
+ */
+export function createEmptyFinanceState(options?: { householdName?: string }): FinanceState {
+  const today = new Date().toISOString().slice(0, 10);
+  const placeholderAccount: FinanceAccount = {
+    id: createId('acct'),
+    name: 'Primary checking',
+    institution: 'Manual',
+    type: 'checking',
+    source: 'manual',
+    openingBalance: 0,
+    lastSynced: today,
+  };
+  return {
+    version: 1,
+    householdName: options?.householdName?.trim() || 'My ledger',
+    currency: 'USD',
+    accounts: [placeholderAccount],
+    transactions: [],
+    imports: [],
+    budgets: [],
+    goals: [],
+    rules: [],
+    preferences: mergePreferences(undefined),
+  };
+}
+
 /** Re-run user rules on every transaction (overwrites categories where a rule matches). */
 export function reapplyRulesToAllTransactions(state: FinanceState): FinanceState {
   return {
