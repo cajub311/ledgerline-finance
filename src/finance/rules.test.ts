@@ -20,6 +20,7 @@ function tx(partial: Partial<FinanceTransaction> & Pick<FinanceTransaction, 'pay
     source: partial.source ?? 'imported',
     reviewed: partial.reviewed ?? false,
     notes: partial.notes,
+    tags: partial.tags,
   };
 }
 
@@ -98,4 +99,48 @@ test('applyImportedBatch: user rules categorize new rows before storage', () => 
   const added = next.transactions.find((t) => t.payee.includes('UNIQUEPAYEE123'));
   assert.ok(added);
   assert.equal(added?.category, 'Subscriptions');
+});
+
+test('applyRulesToTransactions: addTags merges and markReviewed flips reviewed', () => {
+  const rules: FinanceRule[] = [
+    {
+      id: 'r1',
+      payeePattern: 'amazon',
+      assignCategory: 'Shopping',
+      addTags: ['online', 'amz'],
+      markReviewed: true,
+    },
+  ];
+  const txs = [
+    tx({
+      id: '1',
+      payee: 'Amazon Prime',
+      amount: -14,
+      accountId: 'a',
+      category: 'Other',
+      reviewed: false,
+    }),
+  ];
+  const out = applyRulesToTransactions(rules, txs);
+  assert.equal(out[0].category, 'Shopping');
+  assert.deepEqual(out[0].tags, ['online', 'amz']);
+  assert.equal(out[0].reviewed, true);
+});
+
+test('applyRulesToTransactions: addTags normalizes and dedupes across existing + new', () => {
+  const rules: FinanceRule[] = [
+    { id: 'r1', payeePattern: 'uber', assignCategory: 'Travel', addTags: ['Trip 2026', 'ride'] },
+  ];
+  const txs = [
+    tx({
+      id: '1',
+      payee: 'Uber Trip',
+      amount: -15,
+      accountId: 'a',
+      category: 'Travel',
+      tags: ['ride'],
+    }),
+  ];
+  const out = applyRulesToTransactions(rules, txs);
+  assert.deepEqual(out[0].tags, ['ride', 'trip-2026']);
 });

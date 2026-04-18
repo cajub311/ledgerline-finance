@@ -25,6 +25,7 @@ function transactionToRow(state: FinanceState, transaction: FinanceTransaction):
     transaction.reviewed ? 'yes' : 'no',
     transaction.source,
     transaction.notes ?? '',
+    (transaction.tags ?? []).join(' '),
   ];
 }
 
@@ -36,7 +37,7 @@ export interface CsvBuildOptions {
 export function buildTransactionsCsv(state: FinanceState, options: CsvBuildOptions = {}): string {
   const source = options.transactions ?? state.transactions;
   const rows = [
-    ['date', 'payee', 'amount', 'category', 'account', 'reviewed', 'source', 'notes'],
+    ['date', 'payee', 'amount', 'category', 'account', 'reviewed', 'source', 'notes', 'tags'],
     ...source
       .slice()
       .sort((left, right) => right.date.localeCompare(left.date))
@@ -84,7 +85,10 @@ export function buildAccountQif(state: FinanceState, accountId: string): string 
     lines.push(`T${tx.amount.toFixed(2)}`);
     lines.push(`P${tx.payee}`);
     lines.push(`L${tx.category}`);
-    if (tx.notes) lines.push(`M${tx.notes.replace(/\n+/g, ' ')}`);
+    const memoParts: string[] = [];
+    if (tx.notes) memoParts.push(tx.notes.replace(/\n+/g, ' '));
+    if (tx.tags && tx.tags.length) memoParts.push(tx.tags.map((t) => `#${t}`).join(' '));
+    if (memoParts.length) lines.push(`M${memoParts.join(' ')}`);
     lines.push('^');
   }
   return lines.join('\n') + '\n';

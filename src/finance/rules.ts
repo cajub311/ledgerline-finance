@@ -1,5 +1,6 @@
 import type { FinanceRule, FinanceState, FinanceTransaction } from './types';
 import { normalizeCategory } from './categories';
+import { normalizeTag } from './ledger';
 
 /** Safe RegExp.test: never throws on invalid patterns. */
 export function safeRegexTest(pattern: string, text: string): boolean {
@@ -42,17 +43,63 @@ export function applyRules(rules: FinanceRule[], tx: FinanceTransaction): string
   return undefined;
 }
 
-/** Apply ordered rules to a list of transactions (immutable). */
+/**
+ * Apply ordered rules to a list of transactions (immutable). Applies the
+ * first match's category, merges its addTags, and flips reviewed if the
+ * rule requested it.
+ */
 export function applyRulesToTransactions(
   rules: FinanceRule[],
   transactions: FinanceTransaction[],
 ): FinanceTransaction[] {
   return transactions.map((tx) => {
-    const next = applyRules(rules, tx);
-    if (next === undefined) return tx;
-    if (next === tx.category) return tx;
-    return { ...tx, category: next };
+    let firstMatch: FinanceRule | undefined;
+    for (const rule of rules) {
+      if (ruleMatches(rule, tx)) {
+        firstMatch = rule;
+        break;
+      }
+    }
+    if (!firstMatch) return tx;
+
+    const nextCategory = normalizeCategory(firstMatch.assignCategory, tx.payee);
+    const addTags = (firstMatch.addTags ?? [])
+      .map((t) => normalizeTag(t))
+      .filter((t): t is string => Boolean(t));
+
+    const mergedTags = addTags.length
+      ? mergeTagList(tx.tags, addTags)
+      : tx.tags;
+
+    const nextReviewed =
+      firstMatch.markReviewed === true ? true : tx.reviewed;
+
+    if (
+      nextCategory === tx.category &&
+      mergedTags === tx.tags &&
+      nextReviewed === tx.reviewed
+    ) {
+      return tx;
+    }
+
+    return {
+      ...tx,
+      category: nextCategory,
+      tags: mergedTags,
+      reviewed: nextReviewed,
+    };
   });
+}
+
+function mergeTagList(existing: string[] | undefined, incoming: string[]): string[] | undefined {
+  const out = existing ? [...existing] : [];
+  for (const t of incoming) {
+    if (!t) continue;
+    if (out.includes(t)) continue;
+    out.push(t);
+    if (out.length >= 8) break;
+  }
+  return out.length ? out : undefined;
 }
 
 export function addRule(state: FinanceState, rule: FinanceRule): FinanceState {

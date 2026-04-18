@@ -7,7 +7,7 @@ import {
   buildMultiAccountQif,
   buildTransactionsCsv,
 } from './export';
-import { createFinanceState } from './ledger';
+import { createFinanceState, setTransactionsTags } from './ledger';
 import type { FinanceState } from './types';
 
 function seedState(): FinanceState {
@@ -50,4 +50,22 @@ test('OFX export includes proper sign-on header, account block, and transactions
   assert.match(ofx, /OFXHEADER:100/);
   assert.match(ofx, /<OFX>/);
   assert.match(ofx, /<STMTTRN>/);
+});
+
+test('CSV export surfaces transaction tags in a dedicated column', () => {
+  let state = seedState();
+  state = setTransactionsTags(state, [state.transactions[0].id], ['trip-2026', 'tax']);
+  const csv = buildTransactionsCsv(state, { transactions: [state.transactions[0]] });
+  const [header, row] = csv.split('\n');
+  assert.match(header, /tags$/);
+  assert.match(row, /trip-2026 tax/);
+});
+
+test('QIF memo line includes notes and #tag suffixes so round-trips are safe', () => {
+  let state = seedState();
+  const targetId = state.transactions.find((t) => t.accountId === state.accounts[0].id)!.id;
+  state = setTransactionsTags(state, [targetId], ['tax', 'trip-2026']);
+  const qif = buildAccountQif(state, state.accounts[0].id);
+  assert.match(qif, /#tax/);
+  assert.match(qif, /#trip-2026/);
 });

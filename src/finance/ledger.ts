@@ -82,11 +82,40 @@ function cloneRules(rules: FinanceRule[]): FinanceRule[] {
   return rules.map((r) => ({ ...r }));
 }
 
+/** Normalize a single tag string. Returns null for things we should drop. */
+export function normalizeTag(raw: string): string | null {
+  if (typeof raw !== 'string') return null;
+  const cleaned = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 16);
+  return cleaned || null;
+}
+
+/** Normalize + dedupe + cap a tag list to 8 entries. */
+export function normalizeTags(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of raw) {
+    const t = normalizeTag(String(entry));
+    if (!t) continue;
+    if (seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+    if (out.length >= 8) break;
+  }
+  return out.length ? out : undefined;
+}
+
 function normalizeTransaction(transaction: FinanceTransaction): FinanceTransaction {
   return {
     ...transaction,
     category: normalizeCategory(transaction.category, transaction.payee),
     notes: transaction.notes?.trim() || undefined,
+    tags: normalizeTags(transaction.tags),
   };
 }
 
@@ -402,6 +431,7 @@ export interface TransactionPatch {
   accountId?: string;
   notes?: string;
   reviewed?: boolean;
+  tags?: string[];
 }
 
 export function updateTransaction(
@@ -475,6 +505,62 @@ export function setTransactionsCategory(
         : transaction,
     ),
   };
+}
+
+/**
+ * Merge or replace tags on one or more transactions.
+ * `mode` = 'merge' adds new tags and keeps existing ones (default).
+ * `mode` = 'replace' replaces the tag list entirely (after normalization).
+ * `mode` = 'remove' removes the supplied tags from each transaction.
+ */
+export function setTransactionsTags(
+  state: FinanceState,
+  transactionIds: string[],
+  tags: string[],
+  mode: 'merge' | 'replace' | 'remove' = 'merge',
+): FinanceState {
+  if (transactionIds.length === 0) return state;
+  const set = new Set(transactionIds);
+  const incoming = normalizeTags(tags) ?? [];
+  if (incoming.length === 0 && mode !== 'replace' && mode !== 'remove') return state;
+
+  return {
+    ...state,
+    transactions: state.transactions.map((transaction) => {
+      if (!set.has(transaction.id)) return transaction;
+      const existing = transaction.tags ?? [];
+      let nextTags: string[];
+      if (mode === 'replace') {
+        nextTags = incoming;
+      } else if (mode === 'remove') {
+        const remove = new Set(incoming);
+        nextTags = existing.filter((t) => !remove.has(t));
+      } else {
+        const merged = [...existing];
+        for (const t of incoming) {
+          if (!merged.includes(t)) merged.push(t);
+          if (merged.length >= 8) break;
+        }
+        nextTags = merged;
+      }
+      return {
+        ...transaction,
+        tags: nextTags.length ? nextTags : undefined,
+      };
+    }),
+  };
+}
+
+/** List of every unique tag across the ledger, sorted by usage desc then alphabetically. */
+export function getAllTags(state: FinanceState): Array<{ tag: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const tx of state.transactions) {
+    if (!tx.tags) continue;
+    for (const t of tx.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
 }
 
 export function addAccount(

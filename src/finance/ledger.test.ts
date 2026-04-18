@@ -7,16 +7,20 @@ import {
   addManualTransaction,
   applyImportedBatch,
   createFinanceState,
+  getAllTags,
   getBudgetEnvelopes,
   getBudgetStatus,
   getFinanceSummary,
   getNetWorthSeries,
   getSafeToSpend,
+  normalizeTag,
+  normalizeTags,
   patchBudget,
   projectRecurring,
   rehydrateFinanceState,
   rotateTransactionCategory,
   setBudget,
+  setTransactionsTags,
 } from './ledger';
 
 test('summary reflects the seeded ledger', () => {
@@ -472,4 +476,52 @@ test('projectRecurring confidence is capped at 0.95', () => {
   const state = stateWithTxs(txs);
   const rows = projectRecurring(state, 400, new Date(2026, 5, 1));
   assert.ok(rows.every((r) => r.confidence <= 0.95));
+});
+
+test('normalizeTag slugifies and trims to 16 chars', () => {
+  assert.equal(normalizeTag('Trip 2026!!'), 'trip-2026');
+  assert.equal(normalizeTag('  Tax Deductible  '), 'tax-deductible');
+  assert.equal(normalizeTag('A'.repeat(50)), 'a'.repeat(16));
+  assert.equal(normalizeTag(''), null);
+  assert.equal(normalizeTag('   '), null);
+  assert.equal(normalizeTag('!!!'), null);
+});
+
+test('normalizeTags dedupes, caps at 8, and returns undefined for empty', () => {
+  const tags = normalizeTags(['trip', 'Trip', 'tax', 'TAX', 'a', 'b', 'c', 'd', 'e', 'f', 'g']);
+  assert.ok(tags);
+  assert.equal(tags!.length, 8);
+  assert.equal(tags![0], 'trip');
+  assert.equal(normalizeTags([]), undefined);
+  assert.equal(normalizeTags(null), undefined);
+});
+
+test('setTransactionsTags merge keeps existing, replace overwrites, remove removes', () => {
+  let state = createFinanceState();
+  const id = state.transactions[0].id;
+
+  state = setTransactionsTags(state, [id], ['tax']);
+  assert.deepEqual(state.transactions.find((t) => t.id === id)!.tags, ['tax']);
+
+  state = setTransactionsTags(state, [id], ['trip-2026'], 'merge');
+  assert.deepEqual(state.transactions.find((t) => t.id === id)!.tags, ['tax', 'trip-2026']);
+
+  state = setTransactionsTags(state, [id], ['only'], 'replace');
+  assert.deepEqual(state.transactions.find((t) => t.id === id)!.tags, ['only']);
+
+  state = setTransactionsTags(state, [id], ['only'], 'remove');
+  assert.equal(state.transactions.find((t) => t.id === id)!.tags, undefined);
+});
+
+test('getAllTags counts by usage desc', () => {
+  let state = createFinanceState();
+  const ids = state.transactions.slice(0, 3).map((t) => t.id);
+  state = setTransactionsTags(state, ids, ['trip-2026']);
+  state = setTransactionsTags(state, [ids[0]], ['tax']);
+
+  const all = getAllTags(state);
+  assert.equal(all[0].tag, 'trip-2026');
+  assert.equal(all[0].count, 3);
+  assert.equal(all[1].tag, 'tax');
+  assert.equal(all[1].count, 1);
 });

@@ -24,6 +24,8 @@ export interface FinanceTransaction {
   source: TransactionSource;
   reviewed: boolean;
   notes?: string;
+  /** Free-form tags normalized to lower-kebab, max 8 per transaction, max 16 chars each. */
+  tags?: string[];
 }
 
 export interface ImportRecord {
@@ -77,6 +79,10 @@ export interface FinanceRule {
   amountMax?: number;
   /** Category applied when the rule matches */
   assignCategory: string;
+  /** Optional tags to add to matching transactions (merged with existing). */
+  addTags?: string[];
+  /** Optional: mark matching transactions as reviewed. */
+  markReviewed?: boolean;
 }
 
 export interface FinanceState {
