@@ -1,15 +1,17 @@
-import { useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Badge } from '../components/ui/Badge';
 import { Card } from '../components/ui/Card';
 import { StatTile } from '../components/ui/StatTile';
 import { IncomeSpendBars } from '../components/charts/BarChart';
 import { CategoryBreakdownList } from '../components/charts/CategoryBreakdownList';
+import { NetWorthLineChart } from '../components/charts/NetWorthLineChart';
 import {
   detectSubscriptions,
   generateInsights,
   getAccountsWithBalances,
+  getBudgetEnvelopes,
   getBudgetStatus,
   getCategoryBreakdown,
   getCategoryIcon,
@@ -17,11 +19,13 @@ import {
   getFinancialHealthScore,
   getLatestTransactions,
   getMonthlyTrend,
+  getNetWorthSeries,
   getSafeToSpend,
   getSavingsRate,
   getTopMerchants,
+  projectRecurring,
 } from '../finance/ledger';
-import type { FinanceState } from '../finance/types';
+import type { FinanceState, ProjectedRecurringItem } from '../finance/types';
 import { useTheme } from '../theme/ThemeContext';
 import { elevation, radius, spacing, typography } from '../theme/tokens';
 import { formatCurrency } from '../utils/format';
@@ -30,11 +34,18 @@ interface DashboardPageProps {
   state: FinanceState;
 }
 
+type NetWorthHorizon = 3 | 6 | 12 | 0;
+
 export function DashboardPage({ state }: DashboardPageProps) {
   const { palette, mode } = useTheme();
   const summary = useMemo(() => getFinanceSummary(state), [state]);
   const savingsRate = useMemo(() => getSavingsRate(state), [state]);
   const trend = useMemo(() => getMonthlyTrend(state.transactions, 6), [state.transactions]);
+  const [netWorthMonths, setNetWorthMonths] = useState<NetWorthHorizon>(6);
+  const netWorthSeries = useMemo(
+    () => getNetWorthSeries(state, netWorthMonths),
+    [state, netWorthMonths],
+  );
 
   const now = new Date();
   const year = now.getFullYear();
@@ -51,8 +62,15 @@ export function DashboardPage({ state }: DashboardPageProps) {
   const latest = useMemo(() => getLatestTransactions(state, 6), [state]);
   const accounts = useMemo(() => getAccountsWithBalances(state), [state]);
   const budgetStatuses = useMemo(() => getBudgetStatus(state, year, month), [state, year, month]);
+  const envelopeMode = state.preferences.budgetViewMode === 'envelope';
+  const envelopeRows = useMemo(
+    () => getBudgetEnvelopes(state, year, month),
+    [state.budgets, state.transactions, year, month],
+  );
   const subs = useMemo(() => detectSubscriptions(state.transactions), [state.transactions]);
   const insights = useMemo(() => generateInsights(state), [state]);
+  const upcomingHorizonDays = 30;
+  const upcoming = useMemo(() => projectRecurring(state, upcomingHorizonDays), [state]);
 
   const budgetedByCategory = useMemo(() => {
     const map: Record<string, number> = {};
@@ -63,19 +81,43 @@ export function DashboardPage({ state }: DashboardPageProps) {
   const monthLabel = now.toLocaleString('default', { month: 'long', year: 'numeric' });
   const monthName = now.toLocaleString('default', { month: 'long' });
   const net = summary.monthIncome - summary.monthSpend;
-  const overBudget = budgetStatuses.filter((b) => b.status === 'over').length;
+  const overBudget = envelopeMode
+    ? envelopeRows.filter((b) => b.status === 'over').length
+    : budgetStatuses.filter((b) => b.status === 'over').length;
   const subsMonthly = subs.filter((s) => s.frequency === 'monthly').reduce((s, c) => s + c.amount, 0);
   const safeToSpend = useMemo(() => getSafeToSpend(state), [state]);
   const health = useMemo(() => getFinancialHealthScore(state), [state]);
 
-  const healthColor =
-    health.score >= 85
-      ? palette.success
-      : health.score >= 70
-        ? palette.success
-        : health.score >= 50
-          ? palette.warning
-          : palette.danger;
+  const upcomingByWeek = useMemo(() => {
+    const mondayKey = (iso: string) => {
+      const d = new Date(iso + 'T12:00:00');
+      if (!Number.isFinite(d.getTime())) return iso;
+      const dow = d.getDay();
+      const offset = dow === 0 ? -6 : 1 - dow;
+      const mon = new Date(d.getFullYear(), d.getMonth(), d.getDate() + offset);
+      return `${mon.getFullYear()}-${`${mon.getMonth() + 1}`.padStart(2, '0')}-${`${mon.getDate()}`.padStart(2, '0')}`;
+    };
+    const map = new Map<string, { items: ProjectedRecurringItem[]; out: number; inn: number; sort: string }>();
+    for (const row of upcoming) {
+      const key = mondayKey(row.date);
+      if (!map.has(key)) {
+        map.set(key, { items: [], out: 0, inn: 0, sort: key });
+      }
+      const g = map.get(key)!;
+      g.items.push(row);
+      if (row.kind === 'charge') g.out += Math.abs(row.amount);
+      else g.inn += row.amount;
+    }
+    for (const g of map.values()) {
+      g.items.sort((a, b) => {
+        const c = a.date.localeCompare(b.date);
+        if (c !== 0) return c;
+        if (a.kind !== b.kind) return a.kind === 'charge' ? -1 : 1;
+        return a.payee.localeCompare(b.payee);
+      });
+    }
+    return [...map.values()].sort((a, b) => a.sort.localeCompare(b.sort));
+  }, [upcoming]);
 
   return (
     <View style={{ gap: spacing.lg }}>
@@ -179,6 +221,127 @@ export function DashboardPage({ state }: DashboardPageProps) {
           footer={budgetStatuses.length ? `${budgetStatuses.length} budgets tracked` : 'Set a budget to track'}
         />
       </View>
+
+      <Card
+        title="Net worth trend"
+        eyebrow="End of month"
+        action={
+          <View style={styles.pillRow}>
+            {(
+              [
+                { value: 3 as const, label: '3M' },
+                { value: 6 as const, label: '6M' },
+                { value: 12 as const, label: '12M' },
+                { value: 0 as const, label: 'ALL' },
+              ] as const
+            ).map((opt) => {
+              const selected = netWorthMonths === opt.value;
+              return (
+                <Pressable
+                  key={opt.label}
+                  onPress={() => setNetWorthMonths(opt.value)}
+                  style={[
+                    styles.horizonPill,
+                    {
+                      backgroundColor: selected ? palette.primary : palette.surfaceSunken,
+                      borderColor: selected ? palette.primary : palette.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      fontSize: typography.micro,
+                      fontWeight: '700',
+                      color: selected ? palette.primaryText : palette.textMuted,
+                    }}
+                  >
+                    {opt.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        }
+      >
+        {netWorthSeries.length === 0 ? (
+          <Text style={{ color: palette.textSubtle, fontSize: typography.small }}>No data yet.</Text>
+        ) : (
+          <NetWorthLineChart data={netWorthSeries} />
+        )}
+      </Card>
+
+      <Card
+        title="Upcoming in the next 30 days"
+        eyebrow="From detected recurring charges & income"
+        action={
+          upcoming.length ? (
+            <Badge label={`${upcoming.length} projected`} tone="primary" />
+          ) : null
+        }
+      >
+        {upcoming.length === 0 ? (
+          <Text style={{ color: palette.textSubtle, fontSize: typography.small, lineHeight: 19 }}>
+            Add a few more similar-dated paychecks or subscription charges to see projected dates here.
+          </Text>
+        ) : (
+          <View style={{ gap: spacing.lg }}>
+            {upcomingByWeek.map((week) => {
+              const start = new Date(week.sort + 'T12:00:00');
+              const end = new Date(start);
+              end.setDate(start.getDate() + 6);
+              const rangeLabel = `${start.toLocaleString('default', { month: 'short', day: 'numeric' })} – ${end.toLocaleString('default', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+              return (
+                <View key={week.sort} style={{ gap: spacing.sm }}>
+                  <Text style={{ color: palette.text, fontWeight: '800', fontSize: typography.small }}>
+                    {rangeLabel}
+                  </Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md }}>
+                    <Text style={{ color: palette.danger, fontSize: typography.small, fontWeight: '700' }}>
+                      Out {formatCurrency(week.out)}
+                    </Text>
+                    <Text style={{ color: palette.success, fontSize: typography.small, fontWeight: '700' }}>
+                      In {formatCurrency(week.inn)}
+                    </Text>
+                  </View>
+                  <View style={{ gap: spacing.xs }}>
+                    {week.items.map((row, idx) => (
+                      <View
+                        key={`${row.date}-${row.payee}-${row.kind}-${idx}`}
+                        style={[
+                          styles.upcomingRow,
+                          { backgroundColor: palette.surfaceSunken, borderColor: palette.borderSoft },
+                        ]}
+                      >
+                        <Text style={{ color: palette.textSubtle, fontSize: typography.micro, width: 88 }}>
+                          {row.date}
+                        </Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: palette.text, fontWeight: '600', fontSize: typography.small }}>
+                            {row.payee}
+                          </Text>
+                          <Text style={{ color: palette.textMuted, fontSize: typography.micro }}>
+                            {row.frequency} · {Math.round(row.confidence * 100)}% confidence
+                          </Text>
+                        </View>
+                        <Text
+                          style={{
+                            fontWeight: '800',
+                            fontSize: typography.small,
+                            color: row.kind === 'charge' ? palette.text : palette.success,
+                          }}
+                        >
+                          {row.amount < 0 ? '' : '+'}
+                          {formatCurrency(row.amount)}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </Card>
 
       <View style={styles.twoCol}>
         <Card title="Income vs spend" eyebrow="Last 6 months" style={styles.flex2}>
@@ -481,5 +644,26 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 1,
     padding: spacing.md,
+  },
+  pillRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    alignItems: 'center',
+  },
+  horizonPill: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+  },
+  upcomingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
   },
 });

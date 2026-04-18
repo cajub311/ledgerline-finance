@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CashFlowLineChart } from '../components/charts/CashFlowLineChart';
 import { Button } from '../components/ui/Button';
@@ -9,8 +9,10 @@ import {
   detectRecurringIncome,
   detectSubscriptions,
   projectCashFlow,
+  projectRecurring,
   setForecastLowBalanceThreshold,
 } from '../finance/ledger';
+import type { ProjectedRecurringItem } from '../finance/types';
 import type { FinanceState } from '../finance/types';
 import { useTheme } from '../theme/ThemeContext';
 import { radius, spacing, typography } from '../theme/tokens';
@@ -33,6 +35,12 @@ export function ForecastPage({ state, onStateChange }: ForecastPageProps) {
   const projection = useMemo(() => projectCashFlow(state, horizon), [state, horizon]);
   const subs = useMemo(() => detectSubscriptions(state.transactions), [state.transactions]);
   const incomes = useMemo(() => detectRecurringIncome(state.transactions), [state.transactions]);
+  const calendarHorizonDays = 62;
+  const projectedUpcoming = useMemo(
+    () => projectRecurring(state, calendarHorizonDays),
+    [state, calendarHorizonDays],
+  );
+  const [selectedCalendarDay, setSelectedCalendarDay] = useState<string | null>(null);
 
   const chartData = useMemo(
     () =>
@@ -55,6 +63,47 @@ export function ForecastPage({ state, onStateChange }: ForecastPageProps) {
   const uniqueWarnDays = useMemo(() => new Set(projection.belowThresholdDates).size, [projection]);
   const endBalance = projection.points[projection.points.length - 1]?.balance ?? 0;
   const endBalanceOk = threshold === 0 || endBalance >= threshold;
+
+  const calendar = useMemo(() => {
+    const anchor = new Date();
+    const y = anchor.getFullYear();
+    const m = anchor.getMonth();
+    const monthLabel = anchor.toLocaleString('default', { month: 'long', year: 'numeric' });
+    const firstDow = new Date(y, m, 1).getDay();
+    const mondayIndex = (firstDow + 6) % 7;
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const pad = mondayIndex;
+    const cells: Array<{ day: number | null; iso: string | null }> = [];
+    for (let i = 0; i < pad; i++) cells.push({ day: null, iso: null });
+    for (let d = 1; d <= daysInMonth; d++) {
+      const iso = `${y}-${`${m + 1}`.padStart(2, '0')}-${`${d}`.padStart(2, '0')}`;
+      cells.push({ day: d, iso });
+    }
+    while (cells.length % 7 !== 0) cells.push({ day: null, iso: null });
+    while (cells.length < 42) cells.push({ day: null, iso: null });
+
+    const byDate = new Map<string, ProjectedRecurringItem[]>();
+    for (const row of projectedUpcoming) {
+      if (!row.date.startsWith(`${y}-${`${m + 1}`.padStart(2, '0')}`)) continue;
+      const list = byDate.get(row.date) ?? [];
+      list.push(row);
+      byDate.set(row.date, list);
+    }
+    for (const list of byDate.values()) {
+      list.sort((a, b) => {
+        const c = a.date.localeCompare(b.date);
+        if (c !== 0) return c;
+        if (a.kind !== b.kind) return a.kind === 'charge' ? -1 : 1;
+        return a.payee.localeCompare(b.payee);
+      });
+    }
+    return { y, m, monthLabel, cells, byDate };
+  }, [projectedUpcoming]);
+
+  const selectedItems =
+    selectedCalendarDay && calendar.byDate.has(selectedCalendarDay)
+      ? calendar.byDate.get(selectedCalendarDay)!
+      : [];
 
   return (
     <View style={{ gap: spacing.lg }}>
@@ -141,6 +190,94 @@ export function ForecastPage({ state, onStateChange }: ForecastPageProps) {
         )}
       </Card>
 
+      <Card title="Upcoming calendar" eyebrow={calendar.monthLabel}>
+        <Text style={{ color: palette.textMuted, fontSize: typography.small, marginBottom: spacing.md, lineHeight: 19 }}>
+          Dots show projected charges (red) and income (green) from recurring patterns. Tap a day for details.
+        </Text>
+        <View style={styles.calWeekRow}>
+          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
+            <Text key={d} style={[styles.calDow, { color: palette.textSubtle }]}>
+              {d}
+            </Text>
+          ))}
+        </View>
+        <View style={styles.calGrid}>
+          {calendar.cells.map((cell, idx) => {
+            if (cell.day === null || !cell.iso) {
+              return <View key={`e-${idx}`} style={styles.calCell} />;
+            }
+            const items = calendar.byDate.get(cell.iso) ?? [];
+            const hasCharge = items.some((i) => i.kind === 'charge');
+            const hasIncome = items.some((i) => i.kind === 'income');
+            const active = selectedCalendarDay === cell.iso;
+            return (
+              <Pressable
+                key={cell.iso}
+                onPress={() => setSelectedCalendarDay(cell.iso)}
+                style={({ hovered }) => [
+                  styles.calCell,
+                  {
+                    borderColor: active ? palette.primary : hovered ? palette.border : palette.borderSoft,
+                    backgroundColor: active ? palette.primarySoft : palette.surfaceSunken,
+                  },
+                ]}
+              >
+                <Text style={{ color: palette.text, fontWeight: '700', fontSize: typography.small }}>
+                  {cell.day}
+                </Text>
+                <View style={styles.calDots}>
+                  {hasCharge ? (
+                    <View style={[styles.calDot, { backgroundColor: palette.danger }]} />
+                  ) : (
+                    <View style={[styles.calDot, { backgroundColor: 'transparent' }]} />
+                  )}
+                  {hasIncome ? (
+                    <View style={[styles.calDot, { backgroundColor: palette.success }]} />
+                  ) : (
+                    <View style={[styles.calDot, { backgroundColor: 'transparent' }]} />
+                  )}
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+        <View style={{ marginTop: spacing.md, gap: spacing.sm }}>
+          <Text style={{ color: palette.textMuted, fontSize: typography.micro, fontWeight: '700' }}>
+            {selectedCalendarDay ? selectedCalendarDay : 'Select a day'}
+          </Text>
+          {selectedCalendarDay && selectedItems.length === 0 ? (
+            <Text style={{ color: palette.textSubtle, fontSize: typography.small }}>No projected items.</Text>
+          ) : null}
+          {selectedItems.map((row, i) => (
+            <View
+              key={`${row.payee}-${row.kind}-${i}`}
+              style={[
+                styles.calDetailRow,
+                { borderColor: palette.borderSoft, backgroundColor: palette.surfaceSunken },
+              ]}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: palette.text, fontWeight: '700', fontSize: typography.small }}>
+                  {row.payee}
+                </Text>
+                <Text style={{ color: palette.textMuted, fontSize: typography.micro }}>
+                  {row.frequency} · {row.kind === 'charge' ? 'Charge' : 'Income'}
+                </Text>
+              </View>
+              <Text
+                style={{
+                  fontWeight: '800',
+                  color: row.kind === 'charge' ? palette.text : palette.success,
+                }}
+              >
+                {row.amount < 0 ? '' : '+'}
+                {formatCurrency(row.amount)}
+              </Text>
+            </View>
+          ))}
+        </View>
+      </Card>
+
       <View style={styles.twoCol}>
         <Card title="Recurring income (detected)" eyebrow="Used in projection">
           {incomes.length === 0 ? (
@@ -211,4 +348,51 @@ const styles = StyleSheet.create({
   bigNum: { fontSize: typography.title, fontWeight: '800' },
   twoCol: { flexDirection: 'row', gap: spacing.lg, flexWrap: 'wrap' },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  calWeekRow: {
+    flexDirection: 'row',
+    marginBottom: spacing.xs,
+  },
+  calDow: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: typography.micro,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  calGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  calCell: {
+    width: `${100 / 7}%`,
+    aspectRatio: 1,
+    maxWidth: `${100 / 7}%`,
+    paddingVertical: 4,
+    paddingHorizontal: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderRadius: radius.sm,
+  },
+  calDots: {
+    flexDirection: 'row',
+    gap: 3,
+    marginTop: 2,
+    minHeight: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  calDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+  },
 });

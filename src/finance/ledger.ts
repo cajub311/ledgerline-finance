@@ -1,7 +1,9 @@
 import seedData from '../data/financeSeed.json';
 import { CATEGORY_ICONS, CATEGORY_OPTIONS, cycleCategory, normalizeCategory } from './categories';
+import { applyRules, applyRulesToTransactions } from './rules';
 import type {
   Budget,
+  BudgetEnvelopeRow,
   BudgetStatus,
   CashFlowProjection,
   CashFlowProjectionPoint,
@@ -9,6 +11,7 @@ import type {
   DetectedRecurringIncome,
   DetectedSubscription,
   FinanceAccount,
+  FinanceRule,
   FinancialGoal,
   FinancePreferences,
   FinanceState,
@@ -18,13 +21,16 @@ import type {
   ImportRecord,
   ManualTransactionDraft,
   MonthlyTrendItem,
+  NetWorthMonthPoint,
   ParsedStatementBatch,
   ParsedStatementRow,
+  ProjectedRecurringItem,
   TopMerchantItem,
 } from './types';
 
 const DEFAULT_PREFERENCES: FinancePreferences = {
   forecastLowBalanceThreshold: 500,
+  budgetViewMode: 'flow',
 };
 
 function mergePreferences(partial?: Partial<FinancePreferences> | null): FinancePreferences {
@@ -35,6 +41,7 @@ function mergePreferences(partial?: Partial<FinancePreferences> | null): Finance
       partial.forecastLowBalanceThreshold >= 0
         ? partial.forecastLowBalanceThreshold
         : DEFAULT_PREFERENCES.forecastLowBalanceThreshold,
+    budgetViewMode: partial?.budgetViewMode === 'envelope' ? 'envelope' : 'flow',
   };
 }
 
@@ -54,12 +61,25 @@ function cloneImports(imports: ImportRecord[]): ImportRecord[] {
   return imports.map((record) => ({ ...record }));
 }
 
+function normalizeBudget(budget: Budget): Budget {
+  return {
+    ...budget,
+    rollover: typeof budget.rollover === 'boolean' ? budget.rollover : true,
+    carry:
+      typeof budget.carry === 'number' && Number.isFinite(budget.carry) ? Number(budget.carry) : undefined,
+  };
+}
+
 function cloneBudgets(budgets: Budget[]): Budget[] {
-  return budgets.map((b) => ({ ...b }));
+  return budgets.map((b) => normalizeBudget({ ...b }));
 }
 
 function cloneGoals(goals: FinancialGoal[]): FinancialGoal[] {
   return goals.map((g) => ({ ...g }));
+}
+
+function cloneRules(rules: FinanceRule[]): FinanceRule[] {
+  return rules.map((r) => ({ ...r }));
 }
 
 function normalizeTransaction(transaction: FinanceTransaction): FinanceTransaction {
@@ -95,6 +115,121 @@ function accountTypeIsLiquid(type: FinanceAccount['type']): boolean {
   return type === 'checking' || type === 'savings' || type === 'cash';
 }
 
+function monthKeyFromParts(year: number, month: number): string {
+  return `${year}-${`${month}`.padStart(2, '0')}`;
+}
+
+function shiftCalendarMonth(year: number, month: number, delta: number): { year: number; month: number } {
+  const idx = year * 12 + (month - 1) + delta;
+  return { year: Math.floor(idx / 12), month: (idx % 12) + 1 };
+}
+
+function monthKeysEndingAt(endYear: number, endMonth: number, count: number): string[] {
+  const keys: string[] = [];
+  for (let i = count - 1; i >= 0; i -= 1) {
+    const { year, month } = shiftCalendarMonth(endYear, endMonth, -i);
+    keys.push(monthKeyFromParts(year, month));
+  }
+  return keys;
+}
+
+function earliestTransactionMonthKey(transactions: FinanceTransaction[]): string | null {
+  let best: string | null = null;
+  for (const tx of transactions) {
+    const mk = tx.date.slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(mk)) continue;
+    if (!best || mk < best) best = mk;
+  }
+  return best;
+}
+
+function monthKeysFromToInclusive(startKey: string, endKey: string): string[] {
+  const keys: string[] = [];
+  const [sy, sm] = startKey.split('-').map(Number) as [number, number];
+  let y = sy;
+  let m = sm;
+  const [ey, em] = endKey.split('-').map(Number) as [number, number];
+  const endIdx = ey * 12 + (em - 1);
+  while (y * 12 + (m - 1) <= endIdx) {
+    keys.push(monthKeyFromParts(y, m));
+    const next = shiftCalendarMonth(y, m, 1);
+    y = next.year;
+    m = next.month;
+  }
+  return keys;
+}
+
+function pointFromBalances(
+  accounts: FinanceAccount[],
+  running: Record<string, number>,
+  monthKey: string,
+): NetWorthMonthPoint {
+  let assets = 0;
+  let liabilities = 0;
+  for (const account of accounts) {
+    const bal = Number((running[account.id] ?? 0).toFixed(2));
+    if (bal > 0) assets += bal;
+    else liabilities += bal;
+  }
+  assets = Number(assets.toFixed(2));
+  liabilities = Number(liabilities.toFixed(2));
+  const netWorth = Number((assets + liabilities).toFixed(2));
+  const [y, m] = monthKey.split('-').map(Number) as [number, number];
+  const label = new Date(y, m - 1, 1).toLocaleString('default', { month: 'short', year: '2-digit' });
+  return { monthKey, label, netWorth, assets, liabilities };
+}
+
+/**
+ * End-of-month net worth series. Walks transactions once in date order.
+ * Last entry uses all transactions through today (matches `getFinanceSummary(state).netWorth`).
+ * @param months — number of trailing calendar months (≥1), or `0` for “all” months from first transaction to now
+ */
+export function getNetWorthSeries(state: FinanceState, months: number): NetWorthMonthPoint[] {
+  const sorted = [...state.transactions].sort((a, b) => {
+    const c = a.date.localeCompare(b.date);
+    return c !== 0 ? c : a.id.localeCompare(b.id);
+  });
+
+  const now = new Date();
+  const endYear = now.getFullYear();
+  const endMonth = now.getMonth() + 1;
+  const endKey = monthKeyFromParts(endYear, endMonth);
+
+  let seriesKeys: string[];
+  if (!months || months <= 0) {
+    const earliest = earliestTransactionMonthKey(sorted);
+    const startKey = earliest && earliest < endKey ? earliest : endKey;
+    seriesKeys = monthKeysFromToInclusive(startKey, endKey);
+    if (seriesKeys.length === 0) seriesKeys = [endKey];
+  } else {
+    seriesKeys = monthKeysEndingAt(endYear, endMonth, Math.max(1, months));
+  }
+
+  const running: Record<string, number> = {};
+  for (const account of state.accounts) {
+    running[account.id] = Number.isFinite(account.openingBalance) ? account.openingBalance : 0;
+  }
+
+  const result: NetWorthMonthPoint[] = [];
+  let ptr = 0;
+
+  for (let i = 0; i < seriesKeys.length; i += 1) {
+    const mk = seriesKeys[i]!;
+    const isLast = i === seriesKeys.length - 1;
+    while (
+      ptr < sorted.length &&
+      (isLast ? true : sorted[ptr]!.date.slice(0, 7) <= mk)
+    ) {
+      const tx = sorted[ptr]!;
+      running[tx.accountId] = Number(((running[tx.accountId] ?? 0) + tx.amount).toFixed(2));
+      ptr += 1;
+    }
+    result.push(pointFromBalances(state.accounts, running, mk));
+  }
+
+  return result;
+}
+
 export function createFinanceState(): FinanceState {
   const accounts = cloneAccounts(seedData.accounts as FinanceAccount[]);
   const transactions = cloneTransactions(seedData.transactions as FinanceTransaction[]).map(
@@ -103,6 +238,7 @@ export function createFinanceState(): FinanceState {
   const imports = cloneImports(seedData.imports as ImportRecord[]);
   const budgets = cloneBudgets((seedData as { budgets?: Budget[] }).budgets ?? []);
   const goals = cloneGoals((seedData as { goals?: FinancialGoal[] }).goals ?? []);
+  const rules = cloneRules((seedData as { rules?: FinanceRule[] }).rules ?? []);
 
   return {
     version: 1,
@@ -113,6 +249,7 @@ export function createFinanceState(): FinanceState {
     imports,
     budgets,
     goals,
+    rules,
     preferences: mergePreferences(
       (seedData as { preferences?: Partial<FinancePreferences> }).preferences,
     ),
@@ -137,6 +274,7 @@ export function rehydrateFinanceState(snapshot: Partial<FinanceState> | null | u
     imports: cloneImports(snapshot.imports?.length ? (snapshot.imports as ImportRecord[]) : seed.imports),
     budgets: cloneBudgets(snapshot.budgets ?? seed.budgets),
     goals: cloneGoals(snapshot.goals ?? seed.goals),
+    rules: cloneRules(Array.isArray(snapshot.rules) ? snapshot.rules : seed.rules),
     preferences: mergePreferences(snapshot.preferences ?? seed.preferences),
   };
 }
@@ -380,21 +518,28 @@ export function deleteAccount(state: FinanceState, accountId: string): FinanceSt
 }
 
 function mapImportedRowToTransaction(
+  state: FinanceState,
   row: ParsedStatementRow,
   accountId: string,
   sourceLabel: string,
 ): FinanceTransaction {
-  return normalizeTransaction({
+  let category = normalizeCategory(row.category, row.payee);
+  const draft: FinanceTransaction = {
     id: createId('tx'),
     accountId,
     date: row.date,
     payee: row.payee,
     amount: row.amount,
-    category: normalizeCategory(row.category, row.payee),
+    category,
     source: 'imported',
     reviewed: false,
     notes: row.notes ?? sourceLabel,
-  });
+  };
+  const fromRule = applyRules(state.rules, draft);
+  if (fromRule !== undefined) {
+    category = fromRule;
+  }
+  return normalizeTransaction({ ...draft, category });
 }
 
 export function applyImportedBatch(
@@ -403,7 +548,7 @@ export function applyImportedBatch(
   batch: ParsedStatementBatch,
 ): FinanceState {
   const existingKeys = new Set(state.transactions.map(getTransactionKey));
-  const incoming = batch.rows.map((row) => mapImportedRowToTransaction(row, accountId, batch.sourceLabel));
+  const incoming = batch.rows.map((row) => mapImportedRowToTransaction(state, row, accountId, batch.sourceLabel));
   const deduped = incoming.filter((transaction) => !existingKeys.has(getTransactionKey(transaction)));
   const importRecord: ImportRecord = {
     id: createId('imp'),
@@ -425,6 +570,14 @@ export function applyImportedBatch(
 
 export function resetFinanceState(): FinanceState {
   return createFinanceState();
+}
+
+/** Re-run user rules on every transaction (overwrites categories where a rule matches). */
+export function reapplyRulesToAllTransactions(state: FinanceState): FinanceState {
+  return {
+    ...state,
+    transactions: applyRulesToTransactions(state.rules, state.transactions),
+  };
 }
 
 export function hasUnreviewedTransactions(state: FinanceState): boolean {
@@ -707,6 +860,151 @@ export function detectRecurringIncome(transactions: FinanceTransaction[]): Detec
   return incomes.sort((a, b) => b.annualTotal - a.annualTotal);
 }
 
+function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function parseIsoDateLocal(iso: string): Date {
+  const [y, m, d] = iso.split('-').map((n) => Number.parseInt(n, 10));
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return new Date(NaN);
+  return new Date(y, m - 1, d);
+}
+
+function addCalendarDays(date: Date, days: number): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+}
+
+function averageGapDaysBetweenSortedDates(sortedIsoDates: string[]): number | null {
+  if (sortedIsoDates.length < 2) return null;
+  const times = sortedIsoDates.map((iso) => parseIsoDateLocal(iso).getTime());
+  if (times.some((t) => !Number.isFinite(t))) return null;
+  const gaps: number[] = [];
+  for (let i = 1; i < times.length; i++) {
+    gaps.push((times[i]! - times[i - 1]!) / (1000 * 60 * 60 * 24));
+  }
+  return gaps.reduce((s, g) => s + g, 0) / gaps.length;
+}
+
+function defaultGapDaysForFrequency(frequency: DetectedSubscription['frequency']): number {
+  if (frequency === 'weekly') return 7;
+  if (frequency === 'monthly') return 30;
+  return 365;
+}
+
+function patternConfidence(occurrences: number): number {
+  const raw = 0.35 + 0.12 * Math.max(0, occurrences - 2);
+  return Number(Math.min(0.95, raw).toFixed(4));
+}
+
+function transactionsForRecurringPayee(
+  transactions: FinanceTransaction[],
+  payeeNorm: string,
+  kind: 'charge' | 'income',
+): FinanceTransaction[] {
+  return transactions.filter((tx) => {
+    if (tx.payee.trim().toLowerCase() !== payeeNorm) return false;
+    if (kind === 'charge') return tx.amount < 0;
+    return tx.amount > 0;
+  });
+}
+
+/**
+ * Project next recurring charges and income from detected patterns.
+ * Each next date is prior occurrence + average gap (from matching txs), rolling until past the horizon.
+ */
+export function projectRecurring(
+  state: FinanceState,
+  horizonDays: number,
+  asOf: Date = new Date(),
+): ProjectedRecurringItem[] {
+  const txs = state.transactions;
+  const today = startOfLocalDay(asOf);
+  const horizonEnd = addCalendarDays(today, Math.max(0, horizonDays));
+  const horizonEndTime = horizonEnd.getTime();
+
+  const rows: ProjectedRecurringItem[] = [];
+
+  const pushOccurrences = (
+    lastIso: string,
+    payee: string,
+    payeeNorm: string,
+    kind: 'charge' | 'income',
+    frequency: ProjectedRecurringItem['frequency'],
+    medianAmount: number,
+    occurrences: number,
+  ) => {
+    const related = transactionsForRecurringPayee(txs, payeeNorm, kind);
+    const dates = [...new Set(related.map((t) => t.date))].sort((a, b) => a.localeCompare(b));
+    let gap = averageGapDaysBetweenSortedDates(dates);
+    if (gap === null || !Number.isFinite(gap) || gap < 1) {
+      gap = defaultGapDaysForFrequency(frequency);
+    }
+    const gapRounded = Math.max(1, Math.round(gap));
+    const confidence = patternConfidence(occurrences);
+
+    let next = addCalendarDays(parseIsoDateLocal(lastIso), gapRounded);
+    if (!Number.isFinite(next.getTime())) return;
+
+    while (next.getTime() < today.getTime()) {
+      next = addCalendarDays(next, gapRounded);
+    }
+
+    while (next.getTime() <= horizonEndTime) {
+      const dateStr = toIsoDateStatic(next);
+      const signedAmount = kind === 'charge' ? -Math.abs(medianAmount) : Math.abs(medianAmount);
+      rows.push({
+        date: dateStr,
+        payee,
+        amount: Number(signedAmount.toFixed(2)),
+        frequency,
+        kind,
+        confidence,
+      });
+      next = addCalendarDays(next, gapRounded);
+    }
+  };
+
+  for (const sub of detectSubscriptions(txs)) {
+    pushOccurrences(
+      sub.lastCharged,
+      sub.payee,
+      sub.payee.trim().toLowerCase(),
+      'charge',
+      sub.frequency,
+      sub.amount,
+      sub.occurrences,
+    );
+  }
+
+  for (const inc of detectRecurringIncome(txs)) {
+    pushOccurrences(
+      inc.lastReceived,
+      inc.payee,
+      inc.payee.trim().toLowerCase(),
+      'income',
+      inc.frequency,
+      inc.amount,
+      inc.occurrences,
+    );
+  }
+
+  const dedupe = new Map<string, ProjectedRecurringItem>();
+  for (const row of rows) {
+    const key = `${row.date}|${row.kind}|${row.payee.trim().toLowerCase()}`;
+    const prev = dedupe.get(key);
+    if (!prev || prev.confidence < row.confidence) {
+      dedupe.set(key, row);
+    }
+  }
+
+  return [...dedupe.values()].sort((a, b) => {
+    const c = a.date.localeCompare(b.date);
+    if (c !== 0) return c;
+    if (a.kind !== b.kind) return a.kind === 'charge' ? -1 : 1;
+    return a.payee.localeCompare(b.payee);
+  });
+}
+
 function monthSpendExcludingTransfer(transactions: FinanceTransaction[], year: number, month: number): number {
   const monthKey = `${year}-${`${month}`.padStart(2, '0')}`;
   return Number(
@@ -748,8 +1046,10 @@ export function getFinancialHealthScore(state: FinanceState): FinancialHealthSco
   const month = now.getMonth() + 1;
   let score = 100;
 
-  const budgetStatuses = getBudgetStatus(state, year, month);
-  const over = budgetStatuses.filter((b) => b.status === 'over').length;
+  const envelopeMode = state.preferences.budgetViewMode === 'envelope';
+  const over = envelopeMode
+    ? getBudgetEnvelopes(state, year, month).filter((b) => b.status === 'over').length
+    : getBudgetStatus(state, year, month).filter((b) => b.status === 'over').length;
   score -= Math.min(36, over * 12);
 
   const uncategorized = state.transactions.filter(
@@ -854,7 +1154,7 @@ export function setBudget(state: FinanceState, category: string, limit: number):
     return {
       ...state,
       budgets: state.budgets.map((b) =>
-        b.category === category ? { ...b, monthlyLimit: limit } : b,
+        b.category === category ? normalizeBudget({ ...b, monthlyLimit: limit }) : normalizeBudget(b),
       ),
     };
   }
@@ -864,6 +1164,7 @@ export function setBudget(state: FinanceState, category: string, limit: number):
     category,
     monthlyLimit: limit,
     createdAt: new Date().toISOString(),
+    rollover: true,
   };
 
   return {
@@ -903,6 +1204,133 @@ export function getBudgetStatus(
       status: pct >= 1 ? 'over' : pct >= 0.7 ? 'warning' : 'ok',
     };
   });
+}
+
+function padMonth(m: number): string {
+  return `${m}`.padStart(2, '0');
+}
+
+function monthKey(year: number, month: number): string {
+  return `${year}-${padMonth(month)}`;
+}
+
+function monthSpendForCategory(
+  transactions: FinanceTransaction[],
+  year: number,
+  month: number,
+  category: string,
+): number {
+  const key = monthKey(year, month);
+  return Number(
+    transactions
+      .filter(
+        (tx) =>
+          tx.date.startsWith(key) && tx.amount < 0 && tx.category !== 'Transfer' && tx.category === category,
+      )
+      .reduce((sum, tx) => sum + Math.abs(tx.amount), 0)
+      .toFixed(2),
+  );
+}
+
+function budgetCreationMonthIndex(createdAt: string): number {
+  const t = Date.parse(createdAt);
+  const d = Number.isNaN(t) ? new Date(0) : new Date(t);
+  return d.getFullYear() * 12 + d.getMonth();
+}
+
+function targetMonthIndex(year: number, month: number): number {
+  return year * 12 + (month - 1);
+}
+
+/**
+ * Envelope / zero-based view: for each budget, assigned (= monthlyLimit for the month),
+ * carry-in from prior months (from creation month through M-1), spent in M, and available.
+ *
+ * Rollover true: end-of-month balance (assigned + carriedIn - spent) rolls fully (surplus and debt).
+ * Rollover false: surplus is dropped at month end; negative balance (debt) still rolls forward.
+ */
+export function getBudgetEnvelopes(
+  state: FinanceState,
+  year: number,
+  month: number,
+): BudgetEnvelopeRow[] {
+  const tIdx = targetMonthIndex(year, month);
+
+  return state.budgets.map((budget) => {
+    const b = normalizeBudget(budget);
+    const assigned = Number(b.monthlyLimit.toFixed(2));
+    const startIdx = budgetCreationMonthIndex(b.createdAt);
+    const carryBase =
+      typeof b.carry === 'number' && Number.isFinite(b.carry) ? Number(b.carry.toFixed(2)) : 0;
+
+    let rolled = carryBase;
+
+    if (tIdx > startIdx) {
+      for (let idx = startIdx; idx < tIdx; idx += 1) {
+        const y = Math.floor(idx / 12);
+        const m = (idx % 12) + 1;
+        const spentPrev = monthSpendForCategory(state.transactions, y, m, b.category);
+        const envelope = rolled + assigned - spentPrev;
+        if (b.rollover) {
+          rolled = Number(envelope.toFixed(2));
+        } else {
+          rolled = Number((envelope < 0 ? envelope : 0).toFixed(2));
+        }
+      }
+    }
+
+    const carriedIn = Number(rolled.toFixed(2));
+    const spent = monthSpendForCategory(state.transactions, year, month, b.category);
+    const available = Number((carriedIn + assigned - spent).toFixed(2));
+    const denom = Math.abs(carriedIn + assigned) > 1e-6 ? Math.abs(carriedIn + assigned) : assigned;
+    const pct = denom > 0 ? spent / denom : 0;
+    const status: BudgetEnvelopeRow['status'] =
+      available < 0 ? 'over' : pct >= 0.7 ? 'warning' : 'ok';
+
+    return {
+      budgetId: b.id,
+      category: b.category,
+      assigned,
+      carriedIn,
+      spent: Number(spent.toFixed(2)),
+      available,
+      pct: Number(pct.toFixed(4)),
+      status,
+    };
+  });
+}
+
+export function setBudgetViewMode(state: FinanceState, mode: FinancePreferences['budgetViewMode']): FinanceState {
+  return {
+    ...state,
+    preferences: { ...state.preferences, budgetViewMode: mode === 'envelope' ? 'envelope' : 'flow' },
+  };
+}
+
+export function patchBudget(
+  state: FinanceState,
+  budgetId: string,
+  patch: Partial<Pick<Budget, 'monthlyLimit' | 'rollover' | 'carry'>>,
+): FinanceState {
+  return {
+    ...state,
+    budgets: state.budgets.map((b) => {
+      if (b.id !== budgetId) return normalizeBudget(b);
+      const base = normalizeBudget({ ...b });
+      if (patch.monthlyLimit !== undefined) {
+        const n = Number(patch.monthlyLimit);
+        if (Number.isFinite(n) && n >= 0) base.monthlyLimit = Number(n.toFixed(2));
+      }
+      if (patch.rollover !== undefined) {
+        base.rollover = Boolean(patch.rollover);
+      }
+      if (patch.carry !== undefined) {
+        const c = Number(patch.carry);
+        base.carry = Number.isFinite(c) ? Number(c.toFixed(2)) : undefined;
+      }
+      return base;
+    }),
+  };
 }
 
 // ─── Financial Goals ──────────────────────────────────────────────────────────

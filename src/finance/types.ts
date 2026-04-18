@@ -40,6 +40,10 @@ export interface Budget {
   category: string;
   monthlyLimit: number;
   createdAt: string;
+  /** When true, surplus and debt roll into the next month; when false, surplus does not roll (debt still does) */
+  rollover: boolean;
+  /** Optional opening envelope balance at the budget start month */
+  carry?: number;
 }
 
 export interface FinancialGoal {
@@ -54,6 +58,25 @@ export interface FinancialGoal {
 export interface FinancePreferences {
   /** Balance threshold for cash-flow forecast warnings; 0 disables highlights */
   forecastLowBalanceThreshold: number;
+  /** Budgets tab: classic limit vs spend, or envelope with rollover */
+  budgetViewMode: 'flow' | 'envelope';
+}
+
+/** User-defined auto-categorization rule (first match in `rules` order wins). */
+export interface FinanceRule {
+  id: string;
+  /** Optional label for the list UI */
+  name?: string;
+  /** Regex tested against payee; empty string matches any payee */
+  payeePattern: string;
+  /** When set, only transactions on this account are considered */
+  accountId?: string;
+  /** Inclusive lower bound on `amount` (negative for outflows) */
+  amountMin?: number;
+  /** Inclusive upper bound on `amount` */
+  amountMax?: number;
+  /** Category applied when the rule matches */
+  assignCategory: string;
 }
 
 export interface FinanceState {
@@ -66,6 +89,8 @@ export interface FinanceState {
   budgets: Budget[];
   goals: FinancialGoal[];
   preferences: FinancePreferences;
+  /** Ordered rules for auto-categorization (import + bulk re-apply) */
+  rules: FinanceRule[];
 }
 
 export interface ManualTransactionDraft {
@@ -139,6 +164,18 @@ export interface BudgetStatus {
   status: 'ok' | 'warning' | 'over';
 }
 
+/** Per-budget envelope row for a calendar month (YNAB-style assign + rollover). */
+export interface BudgetEnvelopeRow {
+  budgetId: string;
+  category: string;
+  assigned: number;
+  carriedIn: number;
+  spent: number;
+  available: number;
+  pct: number;
+  status: 'ok' | 'warning' | 'over';
+}
+
 export interface GoalStats {
   pct: number;
   remaining: number;
@@ -166,4 +203,24 @@ export interface CashFlowProjection {
   belowThresholdDates: string[];
   startBalance: number;
   horizonDays: number;
+}
+
+/** One month in the net-worth history series (end-of-month balances). */
+export interface NetWorthMonthPoint {
+  monthKey: string;
+  label: string;
+  netWorth: number;
+  assets: number;
+  liabilities: number;
+}
+
+/** Projected upcoming charge or income from detected recurring patterns */
+export interface ProjectedRecurringItem {
+  date: string;
+  payee: string;
+  amount: number;
+  frequency: 'weekly' | 'monthly' | 'annual';
+  kind: 'charge' | 'income';
+  /** 0–0.95 confidence from pattern strength */
+  confidence: number;
 }
