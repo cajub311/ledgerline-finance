@@ -2,23 +2,113 @@ import { inferCategory } from './categories';
 import type { ParsedStatementBatch, ParsedStatementRow } from './types';
 
 const HEADER_ALIASES: Record<string, string[]> = {
-  date: ['date', 'when', 'day', 'transaction date', 'posted date', 'entry date'],
-  payee: ['payee', 'merchant', 'description', 'memo', 'name', 'details', 'transaction description'],
-  amount: ['amount', 'transaction amount'],
-  debit: ['debit', 'withdrawal', 'outflow', 'out', 'money out', 'withdrawals'],
-  credit: ['credit', 'deposit', 'inflow', 'in', 'money in', 'deposits'],
+  date: [
+    'date',
+    'when',
+    'day',
+    'transaction date',
+    'posted date',
+    'entry date',
+    'post date',
+    'trans date',
+    'posting date',
+  ],
+  payee: [
+    'payee',
+    'merchant',
+    'description',
+    'memo',
+    'name',
+    'details',
+    'transaction description',
+    'transaction',
+    'narrative',
+    'reference',
+  ],
+  amount: [
+    'amount',
+    'transaction amount',
+    'amount (usd)',
+    'value',
+    'transaction value',
+  ],
+  debit: [
+    'debit',
+    'withdrawal',
+    'withdrawals',
+    'outflow',
+    'out',
+    'money out',
+    'withdrawals/subtractions',
+    'withdrawal/subtraction',
+    'subtractions',
+    'payments',
+    'charges',
+    'debits',
+  ],
+  credit: [
+    'credit',
+    'deposit',
+    'deposits',
+    'inflow',
+    'in',
+    'money in',
+    'deposits/additions',
+    'deposit/addition',
+    'additions',
+    'credits',
+  ],
   category: ['category', 'spending category', 'memo category'],
-  notes: ['notes', 'memo', 'memo/notes', 'original statement', 'statement', 'reference'],
+  notes: [
+    'notes',
+    'memo',
+    'memo/notes',
+    'original statement',
+    'statement',
+    'reference',
+  ],
   type: ['type', 'transaction type'],
 };
 
+/**
+ * Split a normalized header into tokens so "deposits/additions" also matches
+ * "deposits" and "withdrawals/subtractions" also matches "withdrawals".
+ * Splits on slash, backslash, parens, brackets, hyphen, em dash, comma,
+ * pipe, ampersand, and runs of whitespace. Collapses repeated spaces.
+ */
+function tokenizeHeader(header: string): string[] {
+  const raw = header.trim().toLowerCase();
+  if (!raw) return [];
+  const parts = raw
+    .split(/[\\/()\[\]|&,]|\s[-–—]\s|\s+/g)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  // Also include the full header so exact multi-word aliases keep matching.
+  return Array.from(new Set([raw, ...parts]));
+}
+
 function pickHeaderIndex(headers: string[], aliases: string[]): number {
+  // 1) Exact match on the normalized header.
   for (const alias of aliases) {
     const match = headers.findIndex((header) => header === alias);
+    if (match >= 0) return match;
+  }
 
-    if (match >= 0) {
-      return match;
+  // 2) Token-wise match (handles "deposits/additions", "money in (usd)", etc.).
+  for (let i = 0; i < headers.length; i += 1) {
+    const tokens = tokenizeHeader(headers[i]);
+    for (const alias of aliases) {
+      if (tokens.includes(alias)) return i;
     }
+  }
+
+  // 3) Last-resort substring match for long-form aliases first to avoid
+  //    accidentally matching a shared short word like "in".
+  const longAliases = [...aliases].sort((a, b) => b.length - a.length);
+  for (const alias of longAliases) {
+    if (alias.length < 4) continue;
+    const match = headers.findIndex((header) => header.includes(alias));
+    if (match >= 0) return match;
   }
 
   return -1;
