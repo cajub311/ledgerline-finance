@@ -240,9 +240,20 @@ export function Sidebar<T extends string>({
       </ScrollView>
 
       <View style={[styles.footerNote, { borderTopColor: palette.borderSoft }]}>
-        <Text style={[styles.footerTitle, { color: palette.text }]}>Local-first</Text>
+        <View style={styles.footerRow}>
+          <Text style={[styles.footerTitle, { color: palette.text }]}>Local-first</Text>
+          <View
+            style={[
+              styles.kbdChip,
+              { backgroundColor: palette.surfaceSunken, borderColor: palette.borderSoft },
+            ]}
+          >
+            <Text style={[styles.kbdText, { color: palette.textMuted }]}>⌘K</Text>
+          </View>
+        </View>
         <Text style={[styles.footerText, { color: palette.textSubtle }]}>
-          Your ledger lives on this device. Export a backup from Settings any time.
+          Your ledger lives on this device. Press ⌘K (Ctrl+K on Windows/Linux) to
+          search commands.
         </Text>
       </View>
     </View>
@@ -403,6 +414,23 @@ const styles = StyleSheet.create({
   footerText: {
     fontSize: typography.micro,
     lineHeight: 16,
+  },
+  footerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  kbdChip: {
+    borderWidth: 1,
+    borderRadius: radius.sm,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginLeft: 'auto',
+  },
+  kbdText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   topbar: {
     borderBottomWidth: 1,

@@ -10,7 +10,10 @@ import {
   View,
 } from 'react-native';
 
+import { CommandPalette, type CommandAction } from './components/CommandPalette';
 import { Sidebar, type NavItem, type SidebarSummary } from './components/layout/Sidebar';
+import { buildTransactionsCsv } from './finance/export';
+import { serializeFinanceState } from './finance/backup';
 import {
   createFinanceState,
   getFinanceSummary,
@@ -30,7 +33,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { TransactionsPage } from './pages/TransactionsPage';
 import { ThemeProvider, useTheme } from './theme/ThemeContext';
 import { spacing, typography } from './theme/tokens';
-import { formatCurrency, getErrorMessage } from './utils/format';
+import { downloadText, formatCurrency, getErrorMessage } from './utils/format';
 
 type Tab =
   | 'dashboard'
@@ -62,7 +65,7 @@ export default function FinanceApp() {
 }
 
 function AppShell() {
-  const { palette } = useTheme();
+  const { palette, mode, toggle } = useTheme();
   const { width } = useWindowDimensions();
   const wide = width >= 960;
 
@@ -105,6 +108,90 @@ function AppShell() {
     });
   }, [summary.unreviewedCount]);
 
+  const commandActions = useMemo<CommandAction[]>(() => {
+    const go = (tab: Tab) => () => setActiveTab(tab);
+    const navActions: CommandAction[] = TAB_ROUTES.map((item) => ({
+      id: `go-${item.value}`,
+      label: `Go to ${item.label}`,
+      hint: `${item.section ?? 'App'} · ${item.icon}`,
+      icon: item.icon,
+      section: 'Navigate',
+      keywords: ['open', 'tab', item.value],
+      run: go(item.value),
+    }));
+
+    const exportCsv = () => {
+      const csv = buildTransactionsCsv(state);
+      downloadText(
+        csv,
+        `ledgerline-transactions-${new Date().toISOString().slice(0, 10)}.csv`,
+        'text/csv',
+      );
+    };
+    const exportJson = () => {
+      downloadText(
+        serializeFinanceState(state),
+        `ledgerline-backup-${new Date().toISOString().slice(0, 10)}.json`,
+        'application/json',
+      );
+    };
+    const exportPdf = async () => {
+      try {
+        const { buildStatementPdf } = await import('./finance/exportPdf');
+        const blob = await buildStatementPdf(state);
+        if (typeof document === 'undefined') return;
+        const { downloadBlob } = await import('./utils/format');
+        downloadBlob(
+          blob,
+          `ledgerline-statement-full-${new Date().toISOString().slice(0, 10)}.pdf`,
+        );
+      } catch {
+        // Surfacing errors through the palette is out of scope; the Import
+        // page already has a non-palette path with a proper banner.
+      }
+    };
+
+    return [
+      ...navActions,
+      {
+        id: 'toggle-theme',
+        label: mode === 'dark' ? 'Switch to light theme' : 'Switch to dark theme',
+        hint: 'Appearance',
+        icon: mode === 'dark' ? '☀️' : '🌙',
+        section: 'Tools',
+        keywords: ['theme', 'dark', 'light', 'appearance'],
+        run: () => toggle(),
+      },
+      {
+        id: 'export-csv',
+        label: 'Export transactions CSV',
+        hint: `${state.transactions.length} transactions`,
+        icon: '📄',
+        section: 'Data',
+        keywords: ['download', 'spreadsheet', 'csv', 'export'],
+        run: exportCsv,
+      },
+      {
+        id: 'export-pdf',
+        label: 'Export PDF statement (full ledger)',
+        hint: 'Print-ready',
+        icon: '🧾',
+        section: 'Data',
+        keywords: ['print', 'pdf', 'statement', 'document'],
+        run: exportPdf,
+      },
+      {
+        id: 'export-json',
+        label: 'Export JSON backup',
+        hint: 'Full state snapshot',
+        icon: '💾',
+        section: 'Data',
+        keywords: ['backup', 'save', 'restore', 'archive'],
+        run: exportJson,
+      },
+    ];
+  }, [mode, state, toggle]);
+
   const sidebarSummary = useMemo<SidebarSummary>(() => {
     const trend = getMonthlyTrend(state.transactions, 2);
     const prev = trend[0];
@@ -136,6 +223,7 @@ function AppShell() {
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: palette.bg }]}>
       <StatusBar style="auto" />
+      <CommandPalette actions={commandActions} />
       {wide ? (
         <View style={styles.wideLayout}>
           <Sidebar
