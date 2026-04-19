@@ -4,11 +4,14 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { DateInput } from '../components/ui/DateInput';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
 import {
   addManualTransaction,
+  bulkDeleteTransactions,
+  bulkUpdateTransactions,
   deleteTransaction,
   getAccountsWithBalances,
   getCategoryIcon,
@@ -37,6 +40,16 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
   const [filter, setFilter] = useState<FilterTab>('all');
   const [accountFilter, setAccountFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [minAmount, setMinAmount] = useState('');
+  const [maxAmount, setMaxAmount] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(() => new Set<string>());
+  const [bulkCategory, setBulkCategory] = useState<string>('Other');
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
 
   const [showAdd, setShowAdd] = useState(false);
   const [addDate, setAddDate] = useState(() => formatIsoDate());
@@ -50,6 +63,10 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const min = Number.parseFloat(minAmount);
+    const max = Number.parseFloat(maxAmount);
+    const hasMin = Number.isFinite(min);
+    const hasMax = Number.isFinite(max);
     return state.transactions
       .filter((tx) => {
         if (accountFilter !== 'all' && tx.accountId !== accountFilter) return false;
@@ -57,6 +74,10 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
         if (filter === 'unreviewed' && tx.reviewed) return false;
         if (filter === 'income' && tx.amount <= 0) return false;
         if (filter === 'expense' && tx.amount >= 0) return false;
+        if (dateFrom && tx.date < dateFrom) return false;
+        if (dateTo && tx.date > dateTo) return false;
+        if (hasMin && Math.abs(tx.amount) < min) return false;
+        if (hasMax && Math.abs(tx.amount) > max) return false;
         if (q) {
           const hay = `${tx.payee} ${tx.category} ${tx.notes ?? ''}`.toLowerCase();
           if (!hay.includes(q)) return false;
@@ -64,7 +85,17 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
         return true;
       })
       .sort((a, b) => b.date.localeCompare(a.date));
-  }, [state.transactions, query, filter, accountFilter, categoryFilter]);
+  }, [
+    state.transactions,
+    query,
+    filter,
+    accountFilter,
+    categoryFilter,
+    dateFrom,
+    dateTo,
+    minAmount,
+    maxAmount,
+  ]);
 
   const totals = useMemo(() => {
     let income = 0;
@@ -75,6 +106,70 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
     }
     return { income, expense, net: income - expense };
   }, [filtered]);
+
+  const visibleIds = useMemo(() => filtered.slice(0, 300).map((tx) => tx.id), [filtered]);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+  const selectedCount = selectedIds.size;
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllVisible = () => {
+    if (allVisibleSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of visibleIds) next.delete(id);
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of visibleIds) next.add(id);
+        return next;
+      });
+    }
+  };
+
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+    setConfirmBulkDelete(false);
+  };
+
+  const bulkMarkReviewed = (reviewed: boolean) => {
+    if (selectedCount === 0) return;
+    onStateChange(bulkUpdateTransactions(state, Array.from(selectedIds), { reviewed }));
+    exitSelectMode();
+  };
+
+  const bulkRecategorize = () => {
+    if (selectedCount === 0) return;
+    onStateChange(bulkUpdateTransactions(state, Array.from(selectedIds), { category: bulkCategory }));
+    exitSelectMode();
+  };
+
+  const bulkDelete = () => {
+    if (selectedCount === 0) return;
+    if (!confirmBulkDelete) {
+      setConfirmBulkDelete(true);
+      return;
+    }
+    onStateChange(bulkDeleteTransactions(state, Array.from(selectedIds)));
+    exitSelectMode();
+  };
+
+  const clearAdvancedFilters = () => {
+    setDateFrom('');
+    setDateTo('');
+    setMinAmount('');
+    setMaxAmount('');
+  };
 
   const submitAdd = () => {
     const next = addManualTransaction(state, {
@@ -103,6 +198,11 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
             {filtered.length} shown · {formatCurrency(totals.income)} in · {formatCurrency(totals.expense)} out · net {formatCurrency(totals.net)}
           </Text>
         </View>
+        <Button
+          label={selectMode ? 'Done' : 'Select'}
+          variant="secondary"
+          onPress={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+        />
         <Button label="Add transaction" onPress={() => setShowAdd(true)} />
       </View>
 
@@ -141,8 +241,115 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
               ...categoryOptions.map((c) => ({ value: c, label: c, icon: getCategoryIcon(c) })),
             ]}
           />
+          <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
+            <Button
+              label={showAdvanced ? 'Hide date & amount filters' : 'Date & amount filters'}
+              variant="ghost"
+              size="sm"
+              onPress={() => setShowAdvanced((v) => !v)}
+            />
+            {dateFrom || dateTo || minAmount || maxAmount ? (
+              <Button label="Clear" variant="ghost" size="sm" onPress={clearAdvancedFilters} />
+            ) : null}
+          </View>
+          {showAdvanced ? (
+            <View style={{ gap: spacing.sm }}>
+              <View style={styles.pair}>
+                <View style={{ flex: 1, minWidth: 160 }}>
+                  <DateInput label="From date" value={dateFrom} onChange={setDateFrom} />
+                </View>
+                <View style={{ flex: 1, minWidth: 160 }}>
+                  <DateInput label="To date" value={dateTo} onChange={setDateTo} />
+                </View>
+              </View>
+              <View style={styles.pair}>
+                <View style={{ flex: 1, minWidth: 160 }}>
+                  <Input
+                    label="Min amount"
+                    value={minAmount}
+                    onChangeText={setMinAmount}
+                    placeholder="0"
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+                <View style={{ flex: 1, minWidth: 160 }}>
+                  <Input
+                    label="Max amount"
+                    value={maxAmount}
+                    onChangeText={setMaxAmount}
+                    placeholder="10000"
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+              </View>
+              <Text style={{ color: palette.textSubtle, fontSize: typography.micro }}>
+                Amount filters use the absolute value (ignores sign).
+              </Text>
+            </View>
+          ) : null}
         </View>
       </Card>
+
+      {selectMode ? (
+        <Card padding={spacing.md}>
+          <View style={{ gap: spacing.sm }}>
+            <View style={styles.bulkTop}>
+              <Text style={{ color: palette.text, fontWeight: '700' }}>
+                {selectedCount} selected
+              </Text>
+              <Button
+                label={allVisibleSelected ? 'Clear visible' : 'Select visible'}
+                variant="ghost"
+                size="sm"
+                onPress={toggleSelectAllVisible}
+              />
+            </View>
+            <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
+              <Button
+                label="Mark reviewed"
+                size="sm"
+                variant="secondary"
+                disabled={selectedCount === 0}
+                onPress={() => bulkMarkReviewed(true)}
+              />
+              <Button
+                label="Mark unreviewed"
+                size="sm"
+                variant="ghost"
+                disabled={selectedCount === 0}
+                onPress={() => bulkMarkReviewed(false)}
+              />
+              <Button
+                label={confirmBulkDelete ? 'Confirm delete' : 'Delete'}
+                size="sm"
+                variant="danger"
+                disabled={selectedCount === 0}
+                onPress={bulkDelete}
+              />
+            </View>
+            <View style={styles.pair}>
+              <View style={{ flex: 1, minWidth: 160 }}>
+                <Select
+                  label="Recategorize to"
+                  value={bulkCategory}
+                  onChange={setBulkCategory}
+                  options={categoryOptions.map((c) => ({
+                    value: c,
+                    label: c,
+                    icon: getCategoryIcon(c),
+                  }))}
+                />
+              </View>
+              <Button
+                label="Apply category"
+                size="sm"
+                disabled={selectedCount === 0}
+                onPress={bulkRecategorize}
+              />
+            </View>
+          </View>
+        </Card>
+      ) : null}
 
       <Card padding={spacing.sm}>
         {filtered.length === 0 ? (
@@ -156,18 +363,38 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
           <View>
             {filtered.slice(0, 300).map((tx) => {
               const account = accounts.find((a) => a.id === tx.accountId);
+              const selected = selectedIds.has(tx.id);
               return (
                 <Pressable
                   key={tx.id}
-                  onPress={() => setEditing(tx)}
+                  onPress={() => (selectMode ? toggleSelect(tx.id) : setEditing(tx))}
                   style={({ hovered }) => [
                     styles.row,
                     {
                       borderBottomColor: palette.borderSoft,
-                      backgroundColor: hovered ? palette.surfaceSunken : 'transparent',
+                      backgroundColor: selected
+                        ? palette.surfaceSunken
+                        : hovered
+                          ? palette.surfaceSunken
+                          : 'transparent',
                     },
                   ]}
                 >
+                  {selectMode ? (
+                    <View
+                      style={[
+                        styles.checkbox,
+                        {
+                          borderColor: selected ? palette.primary : palette.border,
+                          backgroundColor: selected ? palette.primary : 'transparent',
+                        },
+                      ]}
+                    >
+                      {selected ? (
+                        <Text style={{ color: '#fff', fontWeight: '800' }}>✓</Text>
+                      ) : null}
+                    </View>
+                  ) : null}
                   <View style={styles.rowIcon}>
                     <Text style={{ fontSize: 18 }}>{getCategoryIcon(tx.category)}</Text>
                   </View>
@@ -214,7 +441,7 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
           </>
         }
       >
-        <Input label="Date (YYYY-MM-DD)" value={addDate} onChangeText={setAddDate} />
+        <DateInput label="Date" value={addDate} onChange={setAddDate} />
         <Input label="Payee" value={addPayee} onChangeText={setAddPayee} placeholder="Payee name" />
         <Input
           label="Amount (negative for expense)"
@@ -332,7 +559,7 @@ function EditTransactionModal({ transaction, state, onClose, onSave, onToggleRev
         </>
       }
     >
-      <Input label="Date (YYYY-MM-DD)" value={date} onChangeText={setDate} />
+      <DateInput label="Date" value={date} onChange={setDate} />
       <Input label="Payee" value={payee} onChangeText={setPayee} />
       <Input label="Amount" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
       <Select
@@ -397,5 +624,26 @@ const styles = StyleSheet.create({
     fontSize: typography.micro,
     textAlign: 'center',
     padding: spacing.md,
+  },
+  pair: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    flexWrap: 'wrap',
+    alignItems: 'flex-end',
+  },
+  bulkTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    flexWrap: 'wrap',
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

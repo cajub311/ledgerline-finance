@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useMemo, useRef, useState } from 'react';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -39,18 +39,17 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
     setTone(kind);
   };
 
-  const handleFilePick = async () => {
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
+
+  const ingestFiles = async (files: File[]) => {
     if (!accountId) {
       notify('Add an account first.', 'danger');
       return;
     }
+    if (files.length === 0) return;
     try {
       setBusy(true);
-      const files = await pickWebStatementFiles();
-      if (files.length === 0) {
-        setBusy(false);
-        return;
-      }
       let imported = 0;
       let skipped = 0;
       let workingState = state;
@@ -71,6 +70,19 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
       notify(`Import failed: ${getErrorMessage(error)}`, 'danger');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleFilePick = async () => {
+    if (!accountId) {
+      notify('Add an account first.', 'danger');
+      return;
+    }
+    try {
+      const files = await pickWebStatementFiles();
+      await ingestFiles(files);
+    } catch (error) {
+      notify(`Import failed: ${getErrorMessage(error)}`, 'danger');
     }
   };
 
@@ -212,17 +224,81 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
             We detect the column headers automatically for most banks. Duplicates are skipped by
             date, payee, and amount.
           </Text>
-          <Button
-            label={busy ? 'Importing…' : 'Choose file(s)'}
-            onPress={handleFilePick}
-            disabled={busy || !webOnly || !accountId}
-            fullWidth
-          />
-          {!webOnly ? (
-            <Text style={{ color: palette.textSubtle, fontSize: typography.micro }}>
-              File upload is available on the web. Paste text below on mobile.
-            </Text>
-          ) : null}
+          {webOnly ? (
+            <Pressable
+              onPress={handleFilePick}
+              disabled={busy || !accountId}
+              {...({
+                onDragEnter: (e: unknown) => {
+                  const event = e as { preventDefault: () => void; stopPropagation: () => void };
+                  event.preventDefault();
+                  event.stopPropagation();
+                  dragDepth.current += 1;
+                  setDragging(true);
+                },
+                onDragOver: (e: unknown) => {
+                  const event = e as { preventDefault: () => void };
+                  event.preventDefault();
+                },
+                onDragLeave: (e: unknown) => {
+                  const event = e as { preventDefault: () => void; stopPropagation: () => void };
+                  event.preventDefault();
+                  event.stopPropagation();
+                  dragDepth.current = Math.max(0, dragDepth.current - 1);
+                  if (dragDepth.current === 0) setDragging(false);
+                },
+                onDrop: (e: unknown) => {
+                  const event = e as {
+                    preventDefault: () => void;
+                    stopPropagation: () => void;
+                    dataTransfer?: { files?: FileList };
+                  };
+                  event.preventDefault();
+                  event.stopPropagation();
+                  dragDepth.current = 0;
+                  setDragging(false);
+                  const files = Array.from(event.dataTransfer?.files ?? []);
+                  if (files.length > 0) void ingestFiles(files);
+                },
+              } as Record<string, unknown>)}
+              style={({ hovered }) => [
+                styles.dropZone,
+                {
+                  borderColor: dragging
+                    ? palette.primary
+                    : hovered
+                      ? palette.primary
+                      : palette.border,
+                  backgroundColor: dragging
+                    ? palette.primarySoft
+                    : hovered
+                      ? palette.surfaceSunken
+                      : palette.surface,
+                  opacity: !accountId || busy ? 0.6 : 1,
+                },
+              ]}
+            >
+              <Text style={{ fontSize: 32 }}>📂</Text>
+              <Text style={{ color: palette.text, fontWeight: '700' }}>
+                {busy ? 'Importing…' : dragging ? 'Drop to import' : 'Drop files here or click to browse'}
+              </Text>
+              <Text style={{ color: palette.textSubtle, fontSize: typography.micro }}>
+                CSV, XLSX, or PDF · multiple files okay
+              </Text>
+            </Pressable>
+          ) : (
+            <>
+              <Button
+                label="Choose file(s)"
+                onPress={handleFilePick}
+                disabled
+                fullWidth
+              />
+              <Text style={{ color: palette.textSubtle, fontSize: typography.micro }}>
+                File upload is available on the web. Paste text below on mobile.
+              </Text>
+            </>
+          )}
         </Card>
 
         <Card title="Paste statement text" eyebrow="Works on any device" style={styles.flex1}>
@@ -300,5 +376,15 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     paddingVertical: 10,
     borderBottomWidth: 1,
+  },
+  dropZone: {
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderRadius: radius.lg,
+    paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
   },
 });

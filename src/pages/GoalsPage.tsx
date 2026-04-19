@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { DateInput } from '../components/ui/DateInput';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import {
@@ -177,7 +178,7 @@ export function GoalsPage({ state, onStateChange }: GoalsPageProps) {
         <Input label="Name" value={name} onChangeText={setName} placeholder="Emergency fund" />
         <Input label="Target amount" value={target} onChangeText={setTarget} placeholder="15000" keyboardType="decimal-pad" />
         <Input label="Starting saved amount" value={current} onChangeText={setCurrent} placeholder="0" keyboardType="decimal-pad" />
-        <Input label="Target date (YYYY-MM-DD)" value={date} onChangeText={setDate} placeholder="2026-12-31" />
+        <DateInput label="Target date" value={date} onChange={setDate} hint="Defaults to one year from today if blank." />
       </Modal>
 
       <Modal

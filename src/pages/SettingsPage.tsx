@@ -1,15 +1,23 @@
 import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
-import { createFinanceState } from '../finance/ledger';
+import {
+  addRule,
+  applyRulesToAll,
+  createFinanceState,
+  deleteRule,
+  getCategoryIcon,
+  getCategoryOptions,
+} from '../finance/ledger';
 import type { FinanceState } from '../finance/types';
 import { clearFinanceState } from '../finance/storage';
 import { useTheme } from '../theme/ThemeContext';
-import { spacing, typography } from '../theme/tokens';
+import { radius, spacing, typography } from '../theme/tokens';
 import { formatCurrency } from '../utils/format';
 
 interface SettingsPageProps {
@@ -21,6 +29,10 @@ export function SettingsPage({ state, onStateChange }: SettingsPageProps) {
   const { palette, mode, setMode } = useTheme();
   const [householdDraft, setHouseholdDraft] = useState(state.householdName);
   const [confirm, setConfirm] = useState(false);
+  const categoryOptions = getCategoryOptions();
+  const [rulePattern, setRulePattern] = useState('');
+  const [ruleCategory, setRuleCategory] = useState<string>(categoryOptions[0] ?? 'Other');
+  const [ruleStatus, setRuleStatus] = useState<string | null>(null);
 
   const save = () => {
     const name = householdDraft.trim();
@@ -42,12 +54,35 @@ export function SettingsPage({ state, onStateChange }: SettingsPageProps) {
     setConfirm(false);
   };
 
+  const submitRule = () => {
+    if (!rulePattern.trim()) return;
+    onStateChange(addRule(state, rulePattern.trim(), ruleCategory));
+    setRulePattern('');
+    setRuleStatus(null);
+  };
+
+  const removeRule = (id: string) => {
+    onStateChange(deleteRule(state, id));
+    setRuleStatus(null);
+  };
+
+  const runRules = () => {
+    const result = applyRulesToAll(state);
+    if (result.updated > 0) onStateChange(result.state);
+    setRuleStatus(
+      result.updated === 0
+        ? 'No transactions matched any rule.'
+        : `Recategorized ${result.updated} transaction${result.updated === 1 ? '' : 's'}.`,
+    );
+  };
+
   const totals = {
     accounts: state.accounts.length,
     transactions: state.transactions.length,
     budgets: state.budgets.length,
     goals: state.goals.length,
     imports: state.imports.length,
+    rules: state.rules.length,
   };
 
   return (
@@ -83,6 +118,76 @@ export function SettingsPage({ state, onStateChange }: SettingsPageProps) {
         />
       </Card>
 
+      <Card title="Auto-categorization rules" eyebrow="Rules">
+        <Text style={{ color: palette.textMuted, fontSize: typography.small, lineHeight: 19 }}>
+          When a payee contains the text below, future imports get the chosen category. Use "Apply
+          rules now" to also recategorize existing transactions.
+        </Text>
+        <View style={{ gap: spacing.sm }}>
+          <Input
+            label="If payee contains"
+            value={rulePattern}
+            onChangeText={setRulePattern}
+            placeholder="e.g. starbucks"
+          />
+          <Select
+            label="Set category to"
+            value={ruleCategory}
+            onChange={setRuleCategory}
+            options={categoryOptions.map((c) => ({ value: c, label: c, icon: getCategoryIcon(c) }))}
+          />
+          <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
+            <Button
+              label="Add rule"
+              onPress={submitRule}
+              disabled={!rulePattern.trim()}
+            />
+            <Button
+              label="Apply rules now"
+              variant="secondary"
+              onPress={runRules}
+              disabled={state.rules.length === 0}
+            />
+          </View>
+          {ruleStatus ? (
+            <Text style={{ color: palette.textSubtle, fontSize: typography.small }}>{ruleStatus}</Text>
+          ) : null}
+        </View>
+        {state.rules.length === 0 ? (
+          <Text style={{ color: palette.textSubtle, fontSize: typography.small }}>
+            No rules yet. Add one above to start auto-categorizing imports.
+          </Text>
+        ) : (
+          <View style={{ gap: spacing.xs }}>
+            {state.rules.map((rule) => (
+              <View
+                key={rule.id}
+                style={[styles.ruleRow, { borderColor: palette.borderSoft }]}
+              >
+                <Text style={{ color: palette.text, fontSize: typography.small, flex: 1 }}>
+                  Payee contains <Text style={{ fontWeight: '700' }}>“{rule.pattern}”</Text>
+                </Text>
+                <Badge label={`${getCategoryIcon(rule.category)} ${rule.category}`} tone="primary" />
+                <Pressable
+                  onPress={() => removeRule(rule.id)}
+                  style={({ hovered }) => [
+                    styles.removeBtn,
+                    {
+                      backgroundColor: hovered ? palette.surfaceSunken : 'transparent',
+                      borderColor: palette.borderSoft,
+                    },
+                  ]}
+                >
+                  <Text style={{ color: palette.danger, fontWeight: '700', fontSize: typography.micro }}>
+                    Remove
+                  </Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        )}
+      </Card>
+
       <Card title="Your data" eyebrow="Local-first">
         <View style={{ gap: spacing.sm }}>
           <Line label="Accounts" value={`${totals.accounts}`} />
@@ -90,6 +195,7 @@ export function SettingsPage({ state, onStateChange }: SettingsPageProps) {
           <Line label="Budgets" value={`${totals.budgets}`} />
           <Line label="Goals" value={`${totals.goals}`} />
           <Line label="Imports recorded" value={`${totals.imports}`} />
+          <Line label="Rules" value={`${totals.rules}`} />
           <Line label="Currency" value={state.currency} />
           <Line
             label="Estimated monthly net"
@@ -137,5 +243,20 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+  },
+  ruleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: 8,
+    paddingHorizontal: spacing.sm,
+    borderBottomWidth: 1,
+    flexWrap: 'wrap',
+  },
+  removeBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: radius.pill,
+    borderWidth: 1,
   },
 });

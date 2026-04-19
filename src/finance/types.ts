@@ -51,6 +51,13 @@ export interface FinancialGoal {
   createdAt: string;
 }
 
+export interface TransactionRule {
+  id: string;
+  pattern: string;
+  category: string;
+  createdAt: string;
+}
+
 export interface FinanceState {
   version: 1;
   householdName: string;
@@ -60,6 +67,7 @@ export interface FinanceState {
   imports: ImportRecord[];
   budgets: Budget[];
   goals: FinancialGoal[];
+  rules: TransactionRule[];
 }
 
 export interface ManualTransactionDraft {

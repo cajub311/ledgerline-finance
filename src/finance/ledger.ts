@@ -17,6 +17,7 @@ import type {
   ParsedStatementBatch,
   ParsedStatementRow,
   TopMerchantItem,
+  TransactionRule,
 } from './types';
 
 function createId(prefix: string): string {
@@ -41,6 +42,25 @@ function cloneBudgets(budgets: Budget[]): Budget[] {
 
 function cloneGoals(goals: FinancialGoal[]): FinancialGoal[] {
   return goals.map((g) => ({ ...g }));
+}
+
+function cloneRules(rules: TransactionRule[]): TransactionRule[] {
+  return rules.map((r) => ({ ...r }));
+}
+
+function applyRulesToCategory(
+  payee: string,
+  fallbackCategory: string,
+  rules: TransactionRule[],
+): string {
+  const haystack = payee.toLowerCase();
+  for (const rule of rules) {
+    const needle = rule.pattern.trim().toLowerCase();
+    if (needle && haystack.includes(needle)) {
+      return rule.category;
+    }
+  }
+  return fallbackCategory;
 }
 
 function normalizeTransaction(transaction: FinanceTransaction): FinanceTransaction {
@@ -84,6 +104,7 @@ export function createFinanceState(): FinanceState {
   const imports = cloneImports(seedData.imports as ImportRecord[]);
   const budgets = cloneBudgets((seedData as { budgets?: Budget[] }).budgets ?? []);
   const goals = cloneGoals((seedData as { goals?: FinancialGoal[] }).goals ?? []);
+  const rules = cloneRules((seedData as { rules?: TransactionRule[] }).rules ?? []);
 
   return {
     version: 1,
@@ -94,6 +115,7 @@ export function createFinanceState(): FinanceState {
     imports,
     budgets,
     goals,
+    rules,
   };
 }
 
@@ -115,6 +137,7 @@ export function rehydrateFinanceState(snapshot: Partial<FinanceState> | null | u
     imports: cloneImports(snapshot.imports?.length ? (snapshot.imports as ImportRecord[]) : seed.imports),
     budgets: cloneBudgets(snapshot.budgets ?? seed.budgets),
     goals: cloneGoals(snapshot.goals ?? seed.goals),
+    rules: cloneRules(snapshot.rules ?? seed.rules ?? []),
   };
 }
 
@@ -272,6 +295,42 @@ export function deleteTransaction(state: FinanceState, transactionId: string): F
   };
 }
 
+export function bulkUpdateTransactions(
+  state: FinanceState,
+  ids: ReadonlyArray<string>,
+  patch: TransactionPatch,
+): FinanceState {
+  if (ids.length === 0) return state;
+  const idSet = new Set(ids);
+  return {
+    ...state,
+    transactions: state.transactions.map((transaction) => {
+      if (!idSet.has(transaction.id)) return transaction;
+      const merged: FinanceTransaction = {
+        ...transaction,
+        ...patch,
+        category:
+          patch.category !== undefined
+            ? normalizeCategory(patch.category, patch.payee ?? transaction.payee)
+            : transaction.category,
+      };
+      return normalizeTransaction(merged);
+    }),
+  };
+}
+
+export function bulkDeleteTransactions(
+  state: FinanceState,
+  ids: ReadonlyArray<string>,
+): FinanceState {
+  if (ids.length === 0) return state;
+  const idSet = new Set(ids);
+  return {
+    ...state,
+    transactions: state.transactions.filter((tx) => !idSet.has(tx.id)),
+  };
+}
+
 export function addAccount(
   state: FinanceState,
   draft: Omit<FinanceAccount, 'id' | 'lastSynced' | 'source'> & {
@@ -316,14 +375,17 @@ function mapImportedRowToTransaction(
   row: ParsedStatementRow,
   accountId: string,
   sourceLabel: string,
+  rules: TransactionRule[],
 ): FinanceTransaction {
+  const inferred = normalizeCategory(row.category, row.payee);
+  const finalCategory = applyRulesToCategory(row.payee, inferred, rules);
   return normalizeTransaction({
     id: createId('tx'),
     accountId,
     date: row.date,
     payee: row.payee,
     amount: row.amount,
-    category: normalizeCategory(row.category, row.payee),
+    category: finalCategory,
     source: 'imported',
     reviewed: false,
     notes: row.notes ?? sourceLabel,
@@ -336,7 +398,9 @@ export function applyImportedBatch(
   batch: ParsedStatementBatch,
 ): FinanceState {
   const existingKeys = new Set(state.transactions.map(getTransactionKey));
-  const incoming = batch.rows.map((row) => mapImportedRowToTransaction(row, accountId, batch.sourceLabel));
+  const incoming = batch.rows.map((row) =>
+    mapImportedRowToTransaction(row, accountId, batch.sourceLabel, state.rules),
+  );
   const deduped = incoming.filter((transaction) => !existingKeys.has(getTransactionKey(transaction)));
   const importRecord: ImportRecord = {
     id: createId('imp'),
@@ -481,6 +545,37 @@ export function getMonthlyTrend(
       monthKey,
       income: Number(income.toFixed(2)),
       spend: Number(spend.toFixed(2)),
+    });
+  }
+
+  return result;
+}
+
+export interface NetWorthPoint {
+  monthKey: string;
+  label: string;
+  netWorth: number;
+}
+
+export function getNetWorthTrend(state: FinanceState, months: number): NetWorthPoint[] {
+  const now = new Date();
+  const openingTotal = state.accounts.reduce((sum, account) => sum + account.openingBalance, 0);
+  const result: NetWorthPoint[] = [];
+
+  for (let i = months - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i + 1, 0);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    const monthKey = `${year}-${`${month}`.padStart(2, '0')}`;
+    const endIso = `${monthKey}-${`${d.getDate()}`.padStart(2, '0')}`;
+    const cumulative = state.transactions
+      .filter((tx) => tx.date <= endIso)
+      .reduce((sum, tx) => sum + tx.amount, 0);
+
+    result.push({
+      monthKey,
+      label: d.toLocaleString('default', { month: 'short', year: '2-digit' }),
+      netWorth: Number((openingTotal + cumulative).toFixed(2)),
     });
   }
 
@@ -678,6 +773,40 @@ export function removeGoal(state: FinanceState, goalId: string): FinanceState {
     ...state,
     goals: state.goals.filter((g) => g.id !== goalId),
   };
+}
+
+// ─── Transaction Rules ────────────────────────────────────────────────────────
+
+export function addRule(state: FinanceState, pattern: string, category: string): FinanceState {
+  const trimmed = pattern.trim();
+  if (!trimmed) return state;
+  const normalized = normalizeCategory(category, '');
+  const rule: TransactionRule = {
+    id: createId('rule'),
+    pattern: trimmed,
+    category: normalized,
+    createdAt: new Date().toISOString(),
+  };
+  return { ...state, rules: [rule, ...state.rules] };
+}
+
+export function deleteRule(state: FinanceState, ruleId: string): FinanceState {
+  return { ...state, rules: state.rules.filter((rule) => rule.id !== ruleId) };
+}
+
+export function applyRulesToAll(state: FinanceState): { state: FinanceState; updated: number } {
+  if (state.rules.length === 0) return { state, updated: 0 };
+  let updated = 0;
+  const transactions = state.transactions.map((tx) => {
+    const next = applyRulesToCategory(tx.payee, tx.category, state.rules);
+    if (next !== tx.category) {
+      updated += 1;
+      return { ...tx, category: next };
+    }
+    return tx;
+  });
+  if (updated === 0) return { state, updated: 0 };
+  return { state: { ...state, transactions }, updated };
 }
 
 export function getGoalStats(goal: FinancialGoal): GoalStats {

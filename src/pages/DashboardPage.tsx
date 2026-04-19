@@ -6,6 +6,7 @@ import { Card } from '../components/ui/Card';
 import { StatTile } from '../components/ui/StatTile';
 import { IncomeSpendBars } from '../components/charts/BarChart';
 import { CategoryBreakdownList } from '../components/charts/CategoryBreakdownList';
+import { NetWorthTrendChart } from '../components/charts/NetWorthTrendChart';
 import {
   detectSubscriptions,
   generateInsights,
@@ -16,6 +17,7 @@ import {
   getFinanceSummary,
   getLatestTransactions,
   getMonthlyTrend,
+  getNetWorthTrend,
   getSavingsRate,
   getTopMerchants,
 } from '../finance/ledger';
@@ -33,6 +35,7 @@ export function DashboardPage({ state }: DashboardPageProps) {
   const summary = useMemo(() => getFinanceSummary(state), [state]);
   const savingsRate = useMemo(() => getSavingsRate(state), [state]);
   const trend = useMemo(() => getMonthlyTrend(state.transactions, 6), [state.transactions]);
+  const netWorthSeries = useMemo(() => getNetWorthTrend(state, 12), [state]);
 
   const now = new Date();
   const year = now.getFullYear();
@@ -91,6 +94,10 @@ export function DashboardPage({ state }: DashboardPageProps) {
           footer={savingsRate >= 20 ? 'Healthy' : savingsRate > 0 ? 'Keep building' : 'No savings this month'}
         />
       </View>
+
+      <Card title="Net worth" eyebrow="Last 12 months">
+        <NetWorthTrendChart series={netWorthSeries} />
+      </Card>
 
       <View style={styles.twoCol}>
         <Card title="Income vs spend" eyebrow="Last 6 months" style={styles.flex2}>
