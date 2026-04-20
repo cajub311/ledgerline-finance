@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -38,6 +46,8 @@ type FilterTab = 'all' | 'unreviewed' | 'income' | 'expense';
 
 export function TransactionsPage({ state, onStateChange }: TransactionsPageProps) {
   const { palette } = useTheme();
+  const { width: windowWidth } = useWindowDimensions();
+  const narrow = windowWidth < 640;
   const accounts = useMemo(() => getAccountsWithBalances(state), [state]);
   const categoryOptions = useMemo(() => getCategoryOptions(), []);
 
@@ -214,12 +224,14 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
           </Text>
         </View>
         <Button
-          label="Export filtered CSV"
+          label={narrow ? 'Export CSV' : 'Export filtered CSV'}
           variant="ghost"
           onPress={exportFilteredCsv}
           disabled={filtered.length === 0}
         />
-        <Button label="Add transaction" onPress={() => setShowAdd(true)} />
+        {narrow ? null : (
+          <Button label="Add transaction" onPress={() => setShowAdd(true)} />
+        )}
       </View>
 
       {selectedIds.size > 0 ? (
@@ -596,9 +608,34 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
           setEditing(null);
         }}
       />
+      {narrow ? (
+        <Pressable
+          onPress={() => setShowAdd(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Add transaction"
+          style={({ pressed, hovered }) => [
+            styles.fab,
+            Platform.OS === 'web' ? (webFixedFab as object) : null,
+            {
+              backgroundColor: palette.primary,
+              shadowColor: '#000',
+              opacity: pressed ? 0.9 : hovered ? 0.95 : 1,
+            },
+          ]}
+        >
+          <Text style={styles.fabPlus}>+</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
+
+const webFixedFab = {
+  position: 'fixed' as const,
+  bottom: 20,
+  right: 20,
+  zIndex: 50,
+};
 
 interface EditProps {
   transaction: FinanceTransaction | null;
@@ -840,5 +877,26 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     flexWrap: 'wrap',
     alignItems: 'flex-end',
+  },
+  fab: {
+    position: 'absolute',
+    bottom: spacing.lg,
+    right: spacing.lg,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  fabPlus: {
+    color: '#fff',
+    fontSize: 32,
+    fontWeight: '700',
+    lineHeight: 34,
+    marginTop: -2,
   },
 });

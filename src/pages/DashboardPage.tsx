@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -43,6 +43,8 @@ type NetWorthHorizon = 3 | 6 | 12 | 0;
 
 export function DashboardPage({ state, onStateChange }: DashboardPageProps) {
   const { palette, mode } = useTheme();
+  const { width: windowWidth } = useWindowDimensions();
+  const narrow = windowWidth < 640;
   const [wipeConfirm, setWipeConfirm] = useState(false);
   const onDemoData = useMemo(() => isSeedState(state), [state]);
 
@@ -182,6 +184,7 @@ export function DashboardPage({ state, onStateChange }: DashboardPageProps) {
         style={[
           styles.hero,
           elevation(3, mode),
+          narrow && { padding: spacing.lg, gap: spacing.md },
           {
             borderColor: palette.borderSoft,
             // @ts-expect-error web-only linear-gradient via style prop
@@ -193,7 +196,9 @@ export function DashboardPage({ state, onStateChange }: DashboardPageProps) {
         <View style={styles.heroTopRow}>
           <View style={{ flex: 1, minWidth: 220 }}>
             <Text style={styles.heroEyebrow}>{monthLabel}</Text>
-            <Text style={styles.heroHeadline}>Good to see you.</Text>
+            <Text style={[styles.heroHeadline, narrow && { fontSize: typography.display }]}>
+              Good to see you.
+            </Text>
             <Text style={styles.heroSubhead}>
               {summary.unreviewedCount > 0
                 ? `${summary.unreviewedCount} transaction${summary.unreviewedCount === 1 ? '' : 's'} to review this month.`
@@ -214,7 +219,7 @@ export function DashboardPage({ state, onStateChange }: DashboardPageProps) {
               Rest of {monthName} at your current pace
             </Text>
           </View>
-          <View style={styles.heroSplitDivider} />
+          {narrow ? null : <View style={styles.heroSplitDivider} />}
           <View style={styles.heroSplitItem}>
             <Text style={styles.heroSplitLabel}>This month net</Text>
             <Text
@@ -229,7 +234,7 @@ export function DashboardPage({ state, onStateChange }: DashboardPageProps) {
               {formatCurrency(summary.monthIncome)} in · {formatCurrency(summary.monthSpend)} out
             </Text>
           </View>
-          <View style={styles.heroSplitDivider} />
+          {narrow ? null : <View style={styles.heroSplitDivider} />}
           <View style={styles.heroSplitItem}>
             <Text style={styles.heroSplitLabel}>Savings rate</Text>
             <Text style={styles.heroSplitValue}>{savingsRate}%</Text>
