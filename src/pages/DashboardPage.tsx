@@ -142,38 +142,41 @@ export function DashboardPage({ state, onStateChange }: DashboardPageProps) {
 
   return (
     <View style={{ gap: spacing.lg }}>
-      {onDemoData ? (
-        <View
-          style={[
-            styles.demoBanner,
-            {
-              backgroundColor: palette.warningSoft,
-              borderColor: palette.warning,
-            },
-          ]}
-        >
-          <View style={{ flex: 1, minWidth: 220 }}>
-            <Text style={[styles.demoBannerTitle, { color: palette.warning }]}>
-              You're viewing demo data
-            </Text>
-            <Text style={[styles.demoBannerBody, { color: palette.textMuted }]}>
-              These accounts and transactions are examples shipped with the app. Wipe them any
-              time to start fresh with your own data — importing on top keeps the demo mixed in.
-            </Text>
-          </View>
-          <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
-            <Button
-              label={wipeConfirm ? 'Tap again to confirm' : 'Start fresh'}
-              variant="primary"
-              onPress={startFresh}
-              accessibilityHint="Wipes demo data and leaves one empty checking account"
-            />
-            {wipeConfirm ? (
-              <Button label="Cancel" variant="ghost" onPress={() => setWipeConfirm(false)} />
-            ) : null}
-          </View>
+      <View
+        style={[
+          styles.demoBanner,
+          onDemoData
+            ? { backgroundColor: palette.warningSoft, borderColor: palette.warning }
+            : { backgroundColor: palette.surface, borderColor: palette.borderSoft },
+        ]}
+      >
+        <View style={{ flex: 1, minWidth: 220 }}>
+          <Text
+            style={[
+              styles.demoBannerTitle,
+              { color: onDemoData ? palette.warning : palette.success },
+            ]}
+          >
+            {onDemoData ? "You're viewing demo data" : 'Your data'}
+          </Text>
+          <Text style={[styles.demoBannerBody, { color: palette.textMuted }]}>
+            {onDemoData
+              ? 'These accounts and transactions are examples shipped with the app. Wipe them any time to start fresh with your own data — importing on top keeps the demo mixed in.'
+              : `Tracking ${state.transactions.length} transaction${state.transactions.length === 1 ? '' : 's'} across ${state.accounts.length} account${state.accounts.length === 1 ? '' : 's'}. Reset any time to wipe everything and begin again.`}
+          </Text>
         </View>
-      ) : null}
+        <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
+          <Button
+            label={wipeConfirm ? 'Tap again to confirm' : onDemoData ? 'Start fresh' : 'Reset all data'}
+            variant={wipeConfirm ? 'danger' : onDemoData ? 'primary' : 'secondary'}
+            onPress={startFresh}
+            accessibilityHint="Wipes all data and leaves one empty checking account"
+          />
+          {wipeConfirm ? (
+            <Button label="Cancel" variant="ghost" onPress={() => setWipeConfirm(false)} />
+          ) : null}
+        </View>
+      </View>
 
       <View
         style={[

@@ -256,7 +256,7 @@ function AppShell() {
             householdName={state.householdName}
             summary={sidebarSummary}
           />
-          <PageContainer>
+          <PageContainer narrow={false}>
             {loadError ? <LoadErrorBanner message={loadError} /> : null}
             <PageBody tab={activeTab} state={state} onStateChange={setState} />
           </PageContainer>
@@ -271,7 +271,7 @@ function AppShell() {
             summary={sidebarSummary}
             compact
           />
-          <PageContainer>
+          <PageContainer narrow>
             {loadError ? <LoadErrorBanner message={loadError} /> : null}
             <PageBody tab={activeTab} state={state} onStateChange={setState} />
           </PageContainer>
@@ -281,10 +281,10 @@ function AppShell() {
   );
 }
 
-function PageContainer({ children }: { children: React.ReactNode }) {
+function PageContainer({ children, narrow }: { children: React.ReactNode; narrow: boolean }) {
   return (
     <ScrollView
-      contentContainerStyle={styles.scroll}
+      contentContainerStyle={narrow ? styles.scrollNarrow : styles.scroll}
       style={styles.scrollWrap}
       showsVerticalScrollIndicator={false}
     >
@@ -363,6 +363,11 @@ const styles = StyleSheet.create({
   },
   scroll: {
     padding: spacing.xl,
+    paddingBottom: spacing.xxxl,
+  },
+  scrollNarrow: {
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
     paddingBottom: spacing.xxxl,
   },
   page: {

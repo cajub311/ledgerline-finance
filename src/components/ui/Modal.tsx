@@ -1,5 +1,13 @@
 import type { ReactNode } from 'react';
-import { Modal as RNModal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Modal as RNModal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
 import { useTheme } from '../../theme/ThemeContext';
 import { radius, spacing, typography } from '../../theme/tokens';
@@ -16,11 +24,22 @@ interface ModalProps {
 
 export function Modal({ visible, onClose, title, subtitle, children, footer, width = 460 }: ModalProps) {
   const { palette } = useTheme();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const narrow = windowWidth < 640;
   if (!visible) return null;
 
   return (
     <RNModal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
-      <Pressable style={[styles.backdrop, { backgroundColor: palette.overlay }]} onPress={onClose}>
+      <Pressable
+        style={[
+          styles.backdrop,
+          {
+            backgroundColor: palette.overlay,
+            padding: narrow ? spacing.sm : spacing.lg,
+          },
+        ]}
+        onPress={onClose}
+      >
         <Pressable
           onPress={(event) => event.stopPropagation()}
           style={[
@@ -28,8 +47,10 @@ export function Modal({ visible, onClose, title, subtitle, children, footer, wid
             {
               backgroundColor: palette.surface,
               borderColor: palette.border,
-              width,
-              maxWidth: '94%',
+              width: narrow ? '100%' : width,
+              maxWidth: narrow ? '100%' : '94%',
+              padding: narrow ? spacing.lg : spacing.xl,
+              gap: narrow ? spacing.md : spacing.lg,
             },
           ]}
         >
@@ -46,10 +67,15 @@ export function Modal({ visible, onClose, title, subtitle, children, footer, wid
               </Pressable>
             </View>
           ) : null}
-          <ScrollView contentContainerStyle={{ gap: spacing.md }} style={{ maxHeight: 520 }}>
+          <ScrollView
+            contentContainerStyle={{ gap: spacing.md }}
+            style={{ maxHeight: narrow ? windowHeight * 0.72 : 520 }}
+          >
             {children}
           </ScrollView>
-          {footer ? <View style={styles.footer}>{footer}</View> : null}
+          {footer ? (
+            <View style={[styles.footer, narrow && styles.footerNarrow]}>{footer}</View>
+          ) : null}
         </Pressable>
       </Pressable>
     </RNModal>
@@ -93,5 +119,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: spacing.sm,
+  },
+  footerNarrow: {
+    flexWrap: 'wrap',
   },
 });
