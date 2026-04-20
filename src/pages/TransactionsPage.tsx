@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { DateInput } from '../components/ui/DateInput';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
@@ -45,6 +46,11 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
   const [accountFilter, setAccountFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [tagFilter, setTagFilter] = useState<string>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [minAmount, setMinAmount] = useState('');
+  const [maxAmount, setMaxAmount] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const allTags = useMemo(() => getAllTags(state), [state]);
 
   const [showAdd, setShowAdd] = useState(false);
@@ -62,6 +68,10 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const min = Number.parseFloat(minAmount);
+    const max = Number.parseFloat(maxAmount);
+    const hasMin = Number.isFinite(min);
+    const hasMax = Number.isFinite(max);
     return state.transactions
       .filter((tx) => {
         if (accountFilter !== 'all' && tx.accountId !== accountFilter) return false;
@@ -70,6 +80,10 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
         if (filter === 'unreviewed' && tx.reviewed) return false;
         if (filter === 'income' && tx.amount <= 0) return false;
         if (filter === 'expense' && tx.amount >= 0) return false;
+        if (dateFrom && tx.date < dateFrom) return false;
+        if (dateTo && tx.date > dateTo) return false;
+        if (hasMin && Math.abs(tx.amount) < min) return false;
+        if (hasMax && Math.abs(tx.amount) > max) return false;
         if (q) {
           const hay = `${tx.payee} ${tx.category} ${tx.notes ?? ''} ${(tx.tags ?? []).join(' ')}`.toLowerCase();
           if (!hay.includes(q)) return false;
@@ -77,7 +91,18 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
         return true;
       })
       .sort((a, b) => b.date.localeCompare(a.date));
-  }, [state.transactions, query, filter, accountFilter, categoryFilter, tagFilter]);
+  }, [
+    state.transactions,
+    query,
+    filter,
+    accountFilter,
+    categoryFilter,
+    tagFilter,
+    dateFrom,
+    dateTo,
+    minAmount,
+    maxAmount,
+  ]);
 
   const totals = useMemo(() => {
     let income = 0;
@@ -303,6 +328,62 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
               ]}
             />
           ) : null}
+          <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
+            <Button
+              label={showAdvanced ? 'Hide date & amount filters' : 'Date & amount filters'}
+              variant="ghost"
+              size="sm"
+              onPress={() => setShowAdvanced((v) => !v)}
+            />
+            {dateFrom || dateTo || minAmount || maxAmount ? (
+              <Button
+                label="Clear"
+                variant="ghost"
+                size="sm"
+                onPress={() => {
+                  setDateFrom('');
+                  setDateTo('');
+                  setMinAmount('');
+                  setMaxAmount('');
+                }}
+              />
+            ) : null}
+          </View>
+          {showAdvanced ? (
+            <View style={{ gap: spacing.sm }}>
+              <View style={styles.filterPair}>
+                <View style={{ flex: 1, minWidth: 160 }}>
+                  <DateInput label="From date" value={dateFrom} onChange={setDateFrom} />
+                </View>
+                <View style={{ flex: 1, minWidth: 160 }}>
+                  <DateInput label="To date" value={dateTo} onChange={setDateTo} />
+                </View>
+              </View>
+              <View style={styles.filterPair}>
+                <View style={{ flex: 1, minWidth: 160 }}>
+                  <Input
+                    label="Min amount"
+                    value={minAmount}
+                    onChangeText={setMinAmount}
+                    placeholder="0"
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+                <View style={{ flex: 1, minWidth: 160 }}>
+                  <Input
+                    label="Max amount"
+                    value={maxAmount}
+                    onChangeText={setMaxAmount}
+                    placeholder="10000"
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+              </View>
+              <Text style={{ color: palette.textSubtle, fontSize: typography.micro }}>
+                Amount filters use the absolute value (ignores sign).
+              </Text>
+            </View>
+          ) : null}
         </View>
       </Card>
 
@@ -474,7 +555,7 @@ export function TransactionsPage({ state, onStateChange }: TransactionsPageProps
           </>
         }
       >
-        <Input label="Date (YYYY-MM-DD)" value={addDate} onChangeText={setAddDate} />
+        <DateInput label="Date" value={addDate} onChange={setAddDate} />
         <Input label="Payee" value={addPayee} onChangeText={setAddPayee} placeholder="Payee name" />
         <Input
           label="Amount (negative for expense)"
@@ -612,7 +693,7 @@ function EditTransactionModal({ transaction, state, onClose, onSave, onToggleRev
         </>
       }
     >
-      <Input label="Date (YYYY-MM-DD)" value={date} onChangeText={setDate} />
+      <DateInput label="Date" value={date} onChange={setDate} />
       <Input label="Payee" value={payee} onChangeText={setPayee} />
       <Input label="Amount" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
       <Select
@@ -753,5 +834,11 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: radius.pill,
     borderWidth: 1,
+  },
+  filterPair: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    flexWrap: 'wrap',
+    alignItems: 'flex-end',
   },
 });
