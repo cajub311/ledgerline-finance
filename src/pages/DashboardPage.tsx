@@ -9,8 +9,10 @@ import { IncomeSpendBars } from '../components/charts/BarChart';
 import { CategoryBreakdownList } from '../components/charts/CategoryBreakdownList';
 import { NetWorthLineChart } from '../components/charts/NetWorthLineChart';
 import {
+  applyDetectedTransfers,
   createEmptyFinanceState,
   detectSubscriptions,
+  detectTransfers,
   generateInsights,
   getAccountsWithBalances,
   getBudgetEnvelopes,
@@ -62,6 +64,7 @@ export function DashboardPage({ state, onStateChange }: DashboardPageProps) {
     setWipeConfirm(false);
   };
   const summary = useMemo(() => getFinanceSummary(state), [state]);
+  const transferPairs = useMemo(() => detectTransfers(state.transactions), [state.transactions]);
   const savingsRate = useMemo(() => getSavingsRate(state), [state]);
   const trend = useMemo(() => getMonthlyTrend(state.transactions, 6), [state.transactions]);
   const [netWorthMonths, setNetWorthMonths] = useState<NetWorthHorizon>(6);
@@ -78,6 +81,16 @@ export function DashboardPage({ state, onStateChange }: DashboardPageProps) {
     () => getCategoryBreakdown(state.transactions, year, month).slice(0, 6),
     [state.transactions, year, month],
   );
+  const priorMonthDate = useMemo(() => {
+    const d = new Date(year, month - 2, 1);
+    return { year: d.getFullYear(), month: d.getMonth() + 1, label: d.toLocaleString('default', { month: 'short' }) };
+  }, [year, month]);
+  const priorByCategory = useMemo(() => {
+    const prior = getCategoryBreakdown(state.transactions, priorMonthDate.year, priorMonthDate.month);
+    const map: Record<string, number> = {};
+    for (const row of prior) map[row.category] = row.total;
+    return map;
+  }, [state.transactions, priorMonthDate.year, priorMonthDate.month]);
   const topMerchants = useMemo(
     () => getTopMerchants(state.transactions, year, month, 5),
     [state.transactions, year, month],
@@ -179,6 +192,31 @@ export function DashboardPage({ state, onStateChange }: DashboardPageProps) {
           ) : null}
         </View>
       </View>
+
+      {transferPairs.length > 0 && onStateChange ? (
+        <View
+          style={[
+            styles.demoBanner,
+            { backgroundColor: palette.primarySoft, borderColor: palette.primary },
+          ]}
+        >
+          <View style={{ flex: 1, minWidth: 220 }}>
+            <Text style={[styles.demoBannerTitle, { color: palette.primary }]}>
+              {transferPairs.length} possible transfer{transferPairs.length === 1 ? '' : 's'} detected
+            </Text>
+            <Text style={[styles.demoBannerBody, { color: palette.textMuted }]}>
+              Matching deposits and withdrawals between your own accounts are still counted as
+              spending and income. Fix them to clean up your totals.
+            </Text>
+          </View>
+          <Button
+            label="Fix transfers"
+            variant="primary"
+            onPress={() => onStateChange(applyDetectedTransfers(state, transferPairs))}
+            accessibilityHint="Re-categorizes matched account-to-account moves as Transfer"
+          />
+        </View>
+      ) : null}
 
       <View
         style={[
@@ -415,6 +453,8 @@ export function DashboardPage({ state, onStateChange }: DashboardPageProps) {
             items={breakdown}
             icons={Object.fromEntries(breakdown.map((b) => [b.category, getCategoryIcon(b.category)]))}
             budgetedByCategory={budgetedByCategory}
+            priorByCategory={priorByCategory}
+            priorLabel={priorMonthDate.label}
           />
         </Card>
       </View>

@@ -15,8 +15,10 @@ import { Sidebar, type NavItem, type SidebarSummary } from './components/layout/
 import { buildTransactionsCsv } from './finance/export';
 import { serializeFinanceState } from './finance/backup';
 import {
+  applyDetectedTransfers,
   createEmptyFinanceState,
   createFinanceState,
+  detectTransfers,
   getFinanceSummary,
   getMonthlyTrend,
   rehydrateFinanceState,
@@ -163,8 +165,26 @@ function AppShell() {
       setActiveTab('dashboard');
     };
 
+    const detectedTransferPairs = detectTransfers(state.transactions);
+    const fixTransfers = () => {
+      if (detectedTransferPairs.length === 0) return;
+      setState(applyDetectedTransfers(state, detectedTransferPairs));
+    };
+
     return [
       ...navActions,
+      {
+        id: 'fix-transfers',
+        label:
+          detectedTransferPairs.length > 0
+            ? `Fix ${detectedTransferPairs.length} detected transfer${detectedTransferPairs.length === 1 ? '' : 's'}`
+            : 'No transfers to fix',
+        hint: 'Re-categorize matched account-to-account moves so they stop inflating spend/income totals',
+        icon: '🔁',
+        section: 'Tools',
+        keywords: ['transfer', 'categorize', 'fix', 'match', 'move', 'clean'],
+        run: fixTransfers,
+      },
       {
         id: 'start-fresh',
         label: 'Start fresh (wipe all data)',

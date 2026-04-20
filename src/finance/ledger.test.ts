@@ -5,9 +5,11 @@ import { parseDelimitedStatement } from './import.shared';
 import type { Budget, FinanceAccount, FinanceState, FinanceTransaction } from './types';
 import {
   addManualTransaction,
+  applyDetectedTransfers,
   applyImportedBatch,
   createEmptyFinanceState,
   createFinanceState,
+  detectTransfers,
   getAllTags,
   getBudgetEnvelopes,
   getBudgetStatus,
@@ -558,4 +560,65 @@ test('isSeedState is true for the factory seed and false after a user manual tx'
 test('isSeedState is false for a blank ledger', () => {
   const fresh = createEmptyFinanceState();
   assert.equal(isSeedState(fresh), false);
+});
+
+test('detectTransfers matches cross-account pairs by amount, sign, and date window', () => {
+  const base = createEmptyFinanceState();
+  const accountA = base.accounts[0]!.id;
+  const accountB = 'acct-b';
+  const withAccountB: FinanceState = {
+    ...base,
+    accounts: [
+      ...base.accounts,
+      {
+        id: accountB,
+        name: 'Savings',
+        institution: 'Test Bank',
+        type: 'savings',
+        source: 'manual',
+        openingBalance: 0,
+        lastSynced: new Date().toISOString(),
+      },
+    ],
+  };
+
+  const txs: FinanceTransaction[] = [
+    // A clean transfer: -500 on A on day 1, +500 on B on day 2.
+    { id: 't1', accountId: accountA, date: '2026-04-10', payee: 'Transfer out', amount: -500, category: 'Other', source: 'manual', reviewed: false },
+    { id: 't2', accountId: accountB, date: '2026-04-11', payee: 'Transfer in', amount: 500, category: 'Other', source: 'manual', reviewed: false },
+    // A real expense that must NOT match: same amount, same account.
+    { id: 't3', accountId: accountA, date: '2026-04-12', payee: 'Grocery', amount: -50, category: 'Food & Dining', source: 'manual', reviewed: false },
+    // A real deposit that must NOT match (no sibling outgoing).
+    { id: 't4', accountId: accountB, date: '2026-04-15', payee: 'Payroll', amount: 1000, category: 'Income', source: 'manual', reviewed: false },
+    // Already labeled Transfer — skipped entirely.
+    { id: 't5', accountId: accountA, date: '2026-04-20', payee: 'Move', amount: -200, category: 'Transfer', source: 'manual', reviewed: true },
+    { id: 't6', accountId: accountB, date: '2026-04-20', payee: 'Move', amount: 200, category: 'Transfer', source: 'manual', reviewed: true },
+    // Too far apart (> 3 days): should NOT match.
+    { id: 't7', accountId: accountA, date: '2026-04-01', payee: 'Slow transfer out', amount: -300, category: 'Other', source: 'manual', reviewed: false },
+    { id: 't8', accountId: accountB, date: '2026-04-08', payee: 'Slow transfer in', amount: 300, category: 'Other', source: 'manual', reviewed: false },
+  ];
+
+  const state: FinanceState = { ...withAccountB, transactions: txs };
+  const pairs = detectTransfers(state.transactions);
+  assert.equal(pairs.length, 1);
+  assert.equal(pairs[0]!.outgoingId, 't1');
+  assert.equal(pairs[0]!.incomingId, 't2');
+  assert.equal(pairs[0]!.daysApart, 1);
+  assert.equal(pairs[0]!.amount, 500);
+});
+
+test('applyDetectedTransfers sets category to Transfer and marks reviewed', () => {
+  const txs: FinanceTransaction[] = [
+    { id: 'o1', accountId: 'a', date: '2026-04-10', payee: 'Transfer out', amount: -500, category: 'Other', source: 'manual', reviewed: false },
+    { id: 'i1', accountId: 'b', date: '2026-04-10', payee: 'Transfer in', amount: 500, category: 'Other', source: 'manual', reviewed: false },
+  ];
+  const base = createEmptyFinanceState();
+  const state: FinanceState = { ...base, transactions: txs };
+  const next = applyDetectedTransfers(state, [
+    { outgoingId: 'o1', incomingId: 'i1', amount: 500, daysApart: 0 },
+  ]);
+  for (const tx of next.transactions) {
+    assert.equal(tx.category, 'Transfer');
+    assert.equal(tx.reviewed, true);
+  }
 });

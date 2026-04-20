@@ -551,6 +551,96 @@ export function setTransactionsTags(
   };
 }
 
+export interface TransferPair {
+  outgoingId: string;
+  incomingId: string;
+  amount: number;
+  daysApart: number;
+}
+
+/**
+ * Find likely transfers between the user's own accounts. Classic finance-app
+ * hygiene: without this, moving $500 from checking → savings shows up as
+ * $500 of "expense" in checking and $500 of "income" in savings, inflating
+ * every spending/income number in the app.
+ *
+ * Heuristic: paired transactions with opposite signs, the exact same absolute
+ * amount, dated within 3 calendar days of each other, in different accounts,
+ * and not already categorized as "Transfer". Each transaction can only
+ * participate in one pair; we greedily match by closest date.
+ */
+export function detectTransfers(
+  transactions: ReadonlyArray<FinanceTransaction>,
+): TransferPair[] {
+  const used = new Set<string>();
+  const pairs: TransferPair[] = [];
+  const candidates = transactions.filter((tx) => tx.category !== 'Transfer');
+
+  const outgoing = candidates
+    .filter((tx) => tx.amount < 0)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  for (const out of outgoing) {
+    if (used.has(out.id)) continue;
+    const outAmount = Math.abs(out.amount);
+    let best: { tx: FinanceTransaction; days: number } | null = null;
+
+    for (const cand of candidates) {
+      if (used.has(cand.id)) continue;
+      if (cand.id === out.id) continue;
+      if (cand.accountId === out.accountId) continue;
+      if (cand.amount <= 0) continue;
+      if (Math.abs(cand.amount - outAmount) > 0.005) continue;
+      const days = Math.abs(daysBetweenIso(out.date, cand.date));
+      if (days > 3) continue;
+      if (!best || days < best.days) {
+        best = { tx: cand, days };
+      }
+    }
+
+    if (best) {
+      used.add(out.id);
+      used.add(best.tx.id);
+      pairs.push({
+        outgoingId: out.id,
+        incomingId: best.tx.id,
+        amount: outAmount,
+        daysApart: best.days,
+      });
+    }
+  }
+
+  return pairs;
+}
+
+/** Re-category both sides of each pair as "Transfer" and mark reviewed. */
+export function applyDetectedTransfers(
+  state: FinanceState,
+  pairs: ReadonlyArray<TransferPair>,
+): FinanceState {
+  if (pairs.length === 0) return state;
+  const ids = new Set<string>();
+  for (const p of pairs) {
+    ids.add(p.outgoingId);
+    ids.add(p.incomingId);
+  }
+  return {
+    ...state,
+    transactions: state.transactions.map((tx) =>
+      ids.has(tx.id)
+        ? { ...tx, category: 'Transfer', reviewed: true }
+        : tx,
+    ),
+  };
+}
+
+function daysBetweenIso(a: string, b: string): number {
+  const aD = new Date(`${a}T12:00:00`);
+  const bD = new Date(`${b}T12:00:00`);
+  if (!Number.isFinite(aD.getTime()) || !Number.isFinite(bD.getTime())) return Infinity;
+  return Math.round((bD.getTime() - aD.getTime()) / 86_400_000);
+}
+
 /** List of every unique tag across the ledger, sorted by usage desc then alphabetically. */
 export function getAllTags(state: FinanceState): Array<{ tag: string; count: number }> {
   const counts = new Map<string, number>();
