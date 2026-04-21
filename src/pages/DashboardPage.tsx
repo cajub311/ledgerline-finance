@@ -77,6 +77,33 @@ export function DashboardPage({ state, onStateChange }: DashboardPageProps) {
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
 
+  const netWorthSpark = useMemo(
+    () => getNetWorthSeries(state, 6).map((p) => p.netWorth),
+    [state],
+  );
+  const last7Days = useMemo(() => {
+    const out: Array<{ iso: string; label: string; spend: number }> = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    for (let i = 6; i >= 0; i -= 1) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      const iso = `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
+      out.push({
+        iso,
+        label: d.toLocaleString('default', { weekday: 'narrow' }),
+        spend: 0,
+      });
+    }
+    const byIso = new Map(out.map((row) => [row.iso, row]));
+    for (const tx of state.transactions) {
+      if (tx.amount >= 0 || tx.category === 'Transfer') continue;
+      const row = byIso.get(tx.date);
+      if (row) row.spend += Math.abs(tx.amount);
+    }
+    return out;
+  }, [state.transactions]);
+  const last7Total = useMemo(() => last7Days.reduce((s, d) => s + d.spend, 0), [last7Days]);
   const breakdown = useMemo(
     () => getCategoryBreakdown(state.transactions, year, month).slice(0, 6),
     [state.transactions, year, month],
@@ -302,7 +329,12 @@ export function DashboardPage({ state, onStateChange }: DashboardPageProps) {
       </View>
 
       <View style={styles.statsGrid}>
-        <StatTile label="Net worth" value={formatCurrency(summary.netWorth)} tone="primary" />
+        <StatTile
+          label="Net worth"
+          value={formatCurrency(summary.netWorth)}
+          tone="primary"
+          sparkline={netWorthSpark}
+        />
         <StatTile
           label="Liquid cash"
           value={formatCurrency(summary.liquidCash)}

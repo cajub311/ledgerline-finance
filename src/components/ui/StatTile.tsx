@@ -1,5 +1,6 @@
 import { StyleSheet, Text, View, type ViewStyle } from 'react-native';
 
+import { Sparkline } from '../charts/Sparkline';
 import { useTheme } from '../../theme/ThemeContext';
 import { elevation, radius, spacing, typography } from '../../theme/tokens';
 
@@ -12,9 +13,19 @@ interface StatTileProps {
   tone?: StatTone;
   footer?: string;
   style?: ViewStyle;
+  /** Optional at-a-glance trend rendered at the bottom of the tile. */
+  sparkline?: number[];
 }
 
-export function StatTile({ label, value, delta, tone = 'neutral', footer, style }: StatTileProps) {
+export function StatTile({
+  label,
+  value,
+  delta,
+  tone = 'neutral',
+  footer,
+  style,
+  sparkline,
+}: StatTileProps) {
   const { palette, mode } = useTheme();
   const toneColor =
     tone === 'positive'
@@ -40,6 +51,11 @@ export function StatTile({ label, value, delta, tone = 'neutral', footer, style 
       <Text style={[styles.value, { color: toneColor }]}>{value}</Text>
       {delta ? <Text style={[styles.delta, { color: palette.textMuted }]}>{delta}</Text> : null}
       {footer ? <Text style={[styles.footer, { color: palette.textSubtle }]}>{footer}</Text> : null}
+      {sparkline && sparkline.length > 1 ? (
+        <View style={styles.spark}>
+          <Sparkline values={sparkline} color={toneColor} height={26} />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -71,5 +87,8 @@ const styles = StyleSheet.create({
   footer: {
     fontSize: typography.micro,
     marginTop: 2,
+  },
+  spark: {
+    marginTop: spacing.sm,
   },
 });

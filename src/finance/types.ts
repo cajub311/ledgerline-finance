@@ -116,6 +116,25 @@ export interface ParsedStatementRow {
   notes?: string;
 }
 
+/**
+ * One visual line of a PDF page reconstructed from text items, with each
+ * item's x-position preserved so a column-aware parser can tell which
+ * numbers are deposits, withdrawals, and running balances.
+ */
+export interface PdfPageLineItem {
+  str: string;
+  x: number;
+}
+
+export interface PdfPageLine {
+  text: string;
+  items: PdfPageLineItem[];
+}
+
+export interface PdfPageLines {
+  lines: PdfPageLine[];
+}
+
 export interface ParsedStatementBatch {
   format: ImportFormat;
   rows: ParsedStatementRow[];

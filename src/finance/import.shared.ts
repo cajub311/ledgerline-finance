@@ -1,5 +1,10 @@
 import { inferCategory } from './categories';
-import type { ParsedStatementBatch, ParsedStatementRow } from './types';
+import type {
+  ParsedStatementBatch,
+  ParsedStatementRow,
+  PdfPageLine,
+  PdfPageLines,
+} from './types';
 
 const HEADER_ALIASES: Record<string, string[]> = {
   date: [
@@ -482,6 +487,226 @@ export function parseObjectStatementRows(records: Array<Record<string, unknown>>
   return records
     .map((record) => rowToStatementRow(record, headers))
     .filter((entry): entry is ParsedStatementRow => Boolean(entry));
+}
+
+/**
+ * Tokens a bank uses to label the deposits (money in) column of a
+ * statement table. Matched case-insensitively against header-line text.
+ */
+const DEPOSIT_HEADER_TOKENS = [
+  'deposits/additions',
+  'deposits / additions',
+  'deposits',
+  'additions',
+  'credits',
+  'money in',
+  'inflow',
+];
+
+/**
+ * Tokens a bank uses to label the withdrawals (money out) column of a
+ * statement table. Matched case-insensitively.
+ */
+const WITHDRAWAL_HEADER_TOKENS = [
+  'withdrawals/subtractions',
+  'withdrawals / subtractions',
+  'withdrawals',
+  'subtractions',
+  'debits',
+  'charges',
+  'money out',
+  'outflow',
+];
+
+/**
+ * Tokens a bank uses to label the running balance column. Amounts in this
+ * column should be ignored — they are cumulative and double-count against
+ * the deposit/withdrawal amounts.
+ */
+const BALANCE_HEADER_TOKENS = [
+  'ending daily balance',
+  'daily balance',
+  'balance',
+];
+
+const AMOUNT_TOKEN = /^[(-]?\$?\d{1,3}(?:,\d{3})*(?:\.\d{2})\)?$/;
+const DATE_TOKEN = /^\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?$/;
+
+interface ColumnHeader {
+  kind: 'deposit' | 'withdrawal' | 'balance';
+  x: number;
+  /** Right edge of the header text so we can match right-aligned numbers. */
+  xRight: number;
+}
+
+function findColumnHeaders(line: PdfPageLine): ColumnHeader[] {
+  const lower = line.text.toLowerCase();
+  const headers: ColumnHeader[] = [];
+
+  const findAnchor = (tokens: string[]): { x: number; xRight: number } | null => {
+    for (const token of tokens) {
+      const idx = lower.indexOf(token);
+      if (idx < 0) continue;
+      // Approximate the x-range by matching item text containing the first word
+      const firstWord = token.split(/\s|\//)[0];
+      const matching = line.items.filter((it) =>
+        it.str.toLowerCase().includes(firstWord),
+      );
+      if (matching.length === 0) continue;
+      const xs = matching.map((it) => it.x);
+      return { x: Math.min(...xs), xRight: Math.max(...xs) + 40 };
+    }
+    return null;
+  };
+
+  const deposit = findAnchor(DEPOSIT_HEADER_TOKENS);
+  if (deposit) headers.push({ kind: 'deposit', ...deposit });
+
+  const withdrawal = findAnchor(WITHDRAWAL_HEADER_TOKENS);
+  if (withdrawal) headers.push({ kind: 'withdrawal', ...withdrawal });
+
+  const balance = findAnchor(BALANCE_HEADER_TOKENS);
+  if (balance) headers.push({ kind: 'balance', ...balance });
+
+  return headers;
+}
+
+/**
+ * Classify a number's x-position as deposit, withdrawal, or balance by
+ * picking the column header whose center is closest. If no headers are
+ * usable, returns null.
+ */
+function classifyAmountColumn(
+  x: number,
+  columns: ColumnHeader[],
+): 'deposit' | 'withdrawal' | 'balance' | null {
+  if (columns.length === 0) return null;
+  let best: ColumnHeader | null = null;
+  let bestDistance = Infinity;
+  for (const col of columns) {
+    const center = (col.x + col.xRight) / 2;
+    const distance = Math.abs(x - center);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = col;
+    }
+  }
+  return best ? best.kind : null;
+}
+
+/**
+ * Extract statement rows from a PDF whose pages preserve per-item x/y
+ * positions. Looks for a header line containing deposit/withdrawal
+ * column labels, then interprets each subsequent date-led line as a
+ * transaction by classifying its numeric tokens against those columns.
+ *
+ * Falls back to returning [] if no usable header is found; callers
+ * should then try the plain-text heuristic parser.
+ */
+export function parsePdfPagesToRows(pages: PdfPageLines[]): ParsedStatementRow[] {
+  const rows: ParsedStatementRow[] = [];
+
+  for (const page of pages) {
+    let columns: ColumnHeader[] = [];
+    let pending: {
+      date: string;
+      descParts: string[];
+      amount: number | null;
+    } | null = null;
+
+    const flushPending = () => {
+      if (!pending) return;
+      if (pending.amount != null && pending.descParts.length > 0) {
+        const payee = pending.descParts
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (payee) {
+          rows.push({
+            date: pending.date,
+            payee,
+            amount: pending.amount,
+            category: inferCategory(payee),
+          });
+        }
+      }
+      pending = null;
+    };
+
+    for (const line of page.lines) {
+      // Refresh column positions whenever we hit a header line (statements
+      // often repeat the table header at page breaks).
+      const maybeHeaders = findColumnHeaders(line);
+      if (
+        maybeHeaders.some((h) => h.kind === 'deposit') ||
+        maybeHeaders.some((h) => h.kind === 'withdrawal')
+      ) {
+        columns = maybeHeaders;
+        flushPending();
+        continue;
+      }
+
+      if (columns.length === 0) continue;
+
+      const items = line.items;
+      if (items.length === 0) continue;
+
+      const firstToken = items[0].str.trim();
+
+      if (DATE_TOKEN.test(firstToken)) {
+        flushPending();
+        const date = parseDate(firstToken);
+        if (!date) continue;
+
+        const descParts: string[] = [];
+        let amount: number | null = null;
+
+        for (let i = 1; i < items.length; i += 1) {
+          const token = items[i].str.trim();
+          if (!token) continue;
+          if (AMOUNT_TOKEN.test(token)) {
+            const parsed = parseAmount(token);
+            if (parsed == null) continue;
+            const column = classifyAmountColumn(items[i].x, columns);
+            if (column === 'deposit') {
+              amount = Math.abs(parsed);
+            } else if (column === 'withdrawal') {
+              amount = -Math.abs(parsed);
+            }
+            // balance or unclassified: ignore
+          } else {
+            descParts.push(token);
+          }
+        }
+
+        pending = { date, descParts, amount };
+        continue;
+      }
+
+      // Continuation line — append descriptive text and pick up an amount
+      // if the first row was a date-only stub without the amount.
+      if (pending) {
+        for (const item of items) {
+          const token = item.str.trim();
+          if (!token) continue;
+          if (AMOUNT_TOKEN.test(token)) {
+            if (pending.amount != null) continue;
+            const parsed = parseAmount(token);
+            if (parsed == null) continue;
+            const column = classifyAmountColumn(item.x, columns);
+            if (column === 'deposit') pending.amount = Math.abs(parsed);
+            else if (column === 'withdrawal') pending.amount = -Math.abs(parsed);
+          } else {
+            pending.descParts.push(token);
+          }
+        }
+      }
+    }
+
+    flushPending();
+  }
+
+  return rows;
 }
 
 export function parseStatementText(text: string): ParsedStatementBatch {
