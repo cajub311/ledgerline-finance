@@ -62,6 +62,14 @@ Long URLs like `ledgernew-73eg17j77-cajub311s-projects.vercel.app` are **one dep
 
 Both projects can be linked to the same GitHub repo; use **Deployments → Production** in the dashboard to see which commit is live. Pushes to `main` update production, not old preview links.
 
+### Why a preview URL can look “broken” (spinner forever or blank)
+
+If **Vercel Authentication** (Deployment Protection) is enabled for your team or project, **unauthenticated** requests to a **deployment URL** (`*.vercel.app` subdomains like `ledgernew-xxxxx-cajub311s-projects.vercel.app`) can return **401** for HTML and for `/_expo/static/...` JavaScript. The page shell may load in some cases while scripts do not, so the app never mounts.
+
+- **Use the production alias** (e.g. **`https://ledgernew.vercel.app`**) for a normal public link; it should return **200** for `/` and for `/_expo/static/js/web/*.js`.
+- **Or** in the Vercel dashboard: **Project → Settings → Deployment Protection** (or team **Security**), relax protection for preview deployments, or use a **shareable link** / logged-in access for that deployment.
+- Quick check: `curl -sI 'https://YOUR-DEPLOYMENT-URL/_expo/static/js/web/index-….js'` — if you see **401**, protection is blocking assets.
+
 CLI deploy:
 
 ```bash
