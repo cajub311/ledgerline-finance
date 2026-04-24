@@ -48,8 +48,24 @@ export function StatTile({
       ]}
     >
       <Text style={[styles.label, { color: palette.textSubtle }]}>{label}</Text>
-      <Text style={[styles.value, { color: toneColor }]}>{value}</Text>
-      {delta ? <Text style={[styles.delta, { color: palette.textMuted }]}>{delta}</Text> : null}
+      <Text
+        style={[
+          styles.value,
+          { color: toneColor, fontFamily: typography.fontFamilyMono },
+        ]}
+      >
+        {value}
+      </Text>
+      {delta ? (
+        <Text
+          style={[
+            styles.delta,
+            { color: palette.textMuted, fontFamily: typography.fontFamilyMono },
+          ]}
+        >
+          {delta}
+        </Text>
+      ) : null}
       {footer ? <Text style={[styles.footer, { color: palette.textSubtle }]}>{footer}</Text> : null}
       {sparkline && sparkline.length > 1 ? (
         <View style={styles.spark}>
@@ -72,12 +88,13 @@ const styles = StyleSheet.create({
   label: {
     fontSize: typography.micro,
     textTransform: 'uppercase',
-    letterSpacing: 1.1,
+    letterSpacing: 2.4,
     fontWeight: '700',
   },
   value: {
     fontSize: typography.display,
-    fontWeight: '800',
+    fontWeight: '600',
+    letterSpacing: -0.4,
     marginTop: 4,
   },
   delta: {

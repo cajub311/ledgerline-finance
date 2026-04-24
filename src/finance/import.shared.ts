@@ -145,7 +145,7 @@ function parseAmount(raw: unknown): number | null {
   return wrappedNegative ? -Math.abs(numeric) : numeric;
 }
 
-function parseDate(raw: unknown): string | null {
+function parseDate(raw: unknown, fallbackYear?: number): string | null {
   if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) {
     return raw.trim();
   }
@@ -172,6 +172,16 @@ function parseDate(raw: unknown): string | null {
 
     const year = third.length === 2 ? `20${third}` : third;
     return `${year}-${first.padStart(2, '0')}-${second.padStart(2, '0')}`;
+  }
+
+  // MM/DD with no year — Wells Fargo and many other bank PDFs print only
+  // month/day in the transaction table, with the year living in the
+  // statement header. Use the caller-supplied fallback year if we have one.
+  if (parts.length === 2 && fallbackYear) {
+    const [first, second] = parts;
+    if (/^\d{1,2}$/.test(first) && /^\d{1,2}$/.test(second)) {
+      return `${fallbackYear}-${first.padStart(2, '0')}-${second.padStart(2, '0')}`;
+    }
   }
 
   const parsed = new Date(text);
@@ -595,6 +605,122 @@ function classifyAmountColumn(
 }
 
 /**
+ * Lines that look like rollover/total rows in a bank statement and must
+ * not be treated as transactions, even when they have a leading date and
+ * a trailing amount. Matched as a prefix on the lowercased line text.
+ */
+const STATEMENT_NOISE_PREFIXES = [
+  'beginning balance',
+  'ending balance',
+  'beginning daily balance',
+  'ending daily balance',
+  'totals',
+  'total deposits',
+  'total withdrawals',
+  'total credits',
+  'total debits',
+  'overdraft and returned item fees',
+  'monthly service fee',
+  'page ',
+];
+
+function isStatementNoiseLine(text: string): boolean {
+  const lower = text.toLowerCase().trim();
+  if (!lower) return true;
+  return STATEMENT_NOISE_PREFIXES.some((prefix) => lower.startsWith(prefix));
+}
+
+const MONTH_NAMES = [
+  'january',
+  'february',
+  'march',
+  'april',
+  'may',
+  'june',
+  'july',
+  'august',
+  'september',
+  'october',
+  'november',
+  'december',
+];
+
+/**
+ * Sniff the statement year out of any header / period line on the PDF.
+ * Wells Fargo's "Statement period" line and Chase's "Opening/Closing
+ * Date" line both contain a 4-digit year; common monthly-summary headers
+ * like "January 1, 2024 - January 31, 2024" do too. Returns the FIRST
+ * 4-digit year we see in a plausible context, or null if none.
+ */
+export function inferStatementYear(pages: PdfPageLines[]): number | null {
+  const yearRange = (y: number) => y >= 1990 && y <= 2099;
+
+  // Pass 1: prefer years that appear next to the words "statement", "period",
+  // "opening", "closing", "ending balance on", a month name, or in a date
+  // like 01/01/2024.
+  const yearWithContext = (text: string): number | null => {
+    const lower = text.toLowerCase();
+    if (
+      !/statement|period|opening|closing|ending balance|beginning balance|cycle|through|to /.test(lower) &&
+      !MONTH_NAMES.some((m) => lower.includes(m)) &&
+      !/\b\d{1,2}[/-]\d{1,2}[/-](19|20)\d{2}\b/.test(text)
+    ) {
+      return null;
+    }
+    const fullDate = text.match(/\b\d{1,2}[/-]\d{1,2}[/-](\d{4})\b/);
+    if (fullDate) {
+      const y = Number.parseInt(fullDate[1], 10);
+      if (yearRange(y)) return y;
+    }
+    const slashShort = text.match(/\b\d{1,2}[/-]\d{1,2}[/-](\d{2})\b/);
+    if (slashShort) {
+      const y = 2000 + Number.parseInt(slashShort[1], 10);
+      if (yearRange(y)) return y;
+    }
+    const bare = text.match(/\b(19|20)(\d{2})\b/);
+    if (bare) {
+      const y = Number.parseInt(bare[1] + bare[2], 10);
+      if (yearRange(y)) return y;
+    }
+    return null;
+  };
+
+  for (const page of pages) {
+    for (const line of page.lines) {
+      const y = yearWithContext(line.text);
+      if (y) return y;
+    }
+  }
+
+  // Pass 2: any 4-digit year on the page, just in case the WF header
+  // wording shifts. Bias toward the most recent plausible year so we
+  // don't accidentally pin to "Member FDIC since 1929".
+  const years: number[] = [];
+  for (const page of pages) {
+    for (const line of page.lines) {
+      const matches = line.text.matchAll(/\b(19|20)(\d{2})\b/g);
+      for (const m of matches) {
+        const y = Number.parseInt(m[1] + m[2], 10);
+        if (yearRange(y) && y >= 2000) years.push(y);
+      }
+    }
+  }
+  if (years.length === 0) return null;
+  // Pick the mode if there's a clear winner; otherwise the max.
+  const counts = new Map<number, number>();
+  for (const y of years) counts.set(y, (counts.get(y) ?? 0) + 1);
+  let best = years[0];
+  let bestCount = 0;
+  for (const [y, c] of counts) {
+    if (c > bestCount || (c === bestCount && y > best)) {
+      best = y;
+      bestCount = c;
+    }
+  }
+  return best;
+}
+
+/**
  * Extract statement rows from a PDF whose pages preserve per-item x/y
  * positions. Looks for a header line containing deposit/withdrawal
  * column labels, then interprets each subsequent date-led line as a
@@ -605,6 +731,7 @@ function classifyAmountColumn(
  */
 export function parsePdfPagesToRows(pages: PdfPageLines[]): ParsedStatementRow[] {
   const rows: ParsedStatementRow[] = [];
+  const fallbackYear = inferStatementYear(pages) ?? undefined;
 
   for (const page of pages) {
     let columns: ColumnHeader[] = [];
@@ -621,7 +748,7 @@ export function parsePdfPagesToRows(pages: PdfPageLines[]): ParsedStatementRow[]
           .join(' ')
           .replace(/\s+/g, ' ')
           .trim();
-        if (payee) {
+        if (payee && !isStatementNoiseLine(payee)) {
           rows.push({
             date: pending.date,
             payee,
@@ -651,11 +778,18 @@ export function parsePdfPagesToRows(pages: PdfPageLines[]): ParsedStatementRow[]
       const items = line.items;
       if (items.length === 0) continue;
 
+      // Skip "Beginning balance on …" / "Ending balance" / page footers
+      // even when they happen to start with a date-shaped token.
+      if (isStatementNoiseLine(line.text)) {
+        flushPending();
+        continue;
+      }
+
       const firstToken = items[0].str.trim();
 
       if (DATE_TOKEN.test(firstToken)) {
         flushPending();
-        const date = parseDate(firstToken);
+        const date = parseDate(firstToken, fallbackYear);
         if (!date) continue;
 
         const descParts: string[] = [];
@@ -721,13 +855,87 @@ export function parseStatementText(text: string): ParsedStatementBatch {
     };
   }
 
+  // Try to sniff a year from any line that looks like a statement period
+  // header so MM/DD-only transaction dates land in the correct year.
+  const fallbackYear = (() => {
+    for (const raw of text.split(/\r?\n/)) {
+      const lower = raw.toLowerCase();
+      if (
+        !/statement|period|opening|closing|ending balance|beginning balance|cycle|through/.test(lower) &&
+        !/\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/.test(raw)
+      ) {
+        continue;
+      }
+      const full = raw.match(/\b\d{1,2}[/-]\d{1,2}[/-](\d{4})\b/);
+      if (full) {
+        const y = Number.parseInt(full[1], 10);
+        if (y >= 1990 && y <= 2099) return y;
+      }
+      const short = raw.match(/\b\d{1,2}[/-]\d{1,2}[/-](\d{2})\b/);
+      if (short) return 2000 + Number.parseInt(short[1], 10);
+      const bare = raw.match(/\b(20\d{2})\b/);
+      if (bare) return Number.parseInt(bare[1], 10);
+    }
+    return undefined;
+  })();
+
   const textRows = text
     .replace(/\r\n/g, '\n')
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
+    .filter((line) => !isStatementNoiseLine(line))
     .map((line) => {
       const compact = line.replace(/\s+/g, ' ');
+
+      // Three-amount layout (Wells Fargo "Date  Description  Deposit
+      // Withdrawal  Balance"): grab the date, take the first non-zero
+      // money column as the transaction amount, and discard the trailing
+      // running balance.
+      const triCol = compact.match(
+        /^(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)\s+(.+?)\s+([(-]?\$?\d[\d,]*\.\d{2}\)?)\s+([(-]?\$?\d[\d,]*\.\d{2}\)?)\s+([(-]?\$?\d[\d,]*\.\d{2}\)?)$/,
+      );
+      if (triCol) {
+        const [, dateRaw, payee, depositRaw, withdrawalRaw] = triCol;
+        const date = parseDate(dateRaw, fallbackYear);
+        const deposit = parseAmount(depositRaw);
+        const withdrawal = parseAmount(withdrawalRaw);
+        const amount =
+          deposit != null && deposit !== 0
+            ? Math.abs(deposit)
+            : withdrawal != null && withdrawal !== 0
+              ? -Math.abs(withdrawal)
+              : null;
+        if (date && amount != null) {
+          return {
+            date,
+            payee: payee.trim(),
+            amount,
+            category: inferCategory(payee),
+          } satisfies ParsedStatementRow;
+        }
+      }
+
+      // Two-amount layout: "Date  Description  Amount  Balance" — the
+      // first amount is the transaction, the second is the running
+      // balance. Sign falls out from the next paragraph's heuristic.
+      const twoCol = compact.match(
+        /^(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)\s+(.+?)\s+([(-]?\$?\d[\d,]*\.\d{2}\)?)\s+([(-]?\$?\d[\d,]*\.\d{2}\)?)$/,
+      );
+      if (twoCol) {
+        const [, dateRaw, payee, amountRaw] = twoCol;
+        const date = parseDate(dateRaw, fallbackYear);
+        const amount = parseAmount(amountRaw);
+        if (date && amount != null) {
+          return {
+            date,
+            payee: payee.trim(),
+            amount,
+            category: inferCategory(payee),
+          } satisfies ParsedStatementRow;
+        }
+      }
+
       const match = compact.match(
         /^(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)\s+(.+?)\s+([(-]?\$?\d[\d,]*\.\d{2}\)?)$/,
       );
@@ -737,7 +945,7 @@ export function parseStatementText(text: string): ParsedStatementBatch {
       }
 
       const [, dateRaw, payee, amountRaw] = match;
-      const date = parseDate(dateRaw);
+      const date = parseDate(dateRaw, fallbackYear);
       const amount = parseAmount(amountRaw);
 
       if (!date || amount == null) {

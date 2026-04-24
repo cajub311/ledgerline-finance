@@ -39,15 +39,36 @@ export function Card({
       ]}
     >
       {(title || action || eyebrow) && (
-        <View style={styles.header}>
-          <View style={{ flex: 1 }}>
-            {eyebrow ? (
-              <Text style={[styles.eyebrow, { color: palette.textSubtle }]}>{eyebrow}</Text>
-            ) : null}
-            {title ? <Text style={[styles.title, { color: palette.text }]}>{title}</Text> : null}
+        <>
+          <View style={styles.header}>
+            <View style={{ flex: 1 }}>
+              {eyebrow ? (
+                <Text style={[styles.eyebrow, { color: palette.primary }]}>{eyebrow}</Text>
+              ) : null}
+              {title ? (
+                <Text
+                  style={[
+                    styles.title,
+                    {
+                      color: palette.text,
+                      fontFamily: typography.fontFamilyDisplay,
+                    },
+                  ]}
+                >
+                  {title}
+                </Text>
+              ) : null}
+            </View>
+            {action}
           </View>
-          {action}
-        </View>
+          {/* Hairline gold rule under the card head — Victorian ledger feel. */}
+          <View
+            style={[
+              styles.headerRule,
+              { backgroundColor: palette.borderSoft },
+            ]}
+          />
+        </>
       )}
       {children}
     </View>
@@ -65,15 +86,22 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: spacing.md,
   },
+  headerRule: {
+    height: 1,
+    marginTop: -spacing.xs,
+    marginBottom: spacing.xs,
+    opacity: 0.6,
+  },
   eyebrow: {
     fontSize: typography.micro,
     textTransform: 'uppercase',
-    letterSpacing: 1.1,
+    letterSpacing: 2.4,
     fontWeight: '700',
     marginBottom: 4,
   },
   title: {
-    fontSize: typography.subtitle,
-    fontWeight: '700',
+    fontSize: typography.title,
+    fontWeight: '600',
+    letterSpacing: 0.6,
   },
 });

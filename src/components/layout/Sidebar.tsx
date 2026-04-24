@@ -52,6 +52,9 @@ export function Sidebar<T extends string>({
           </View>
           <View style={{ flex: 1 }}>
             <Text style={[styles.brandName, { color: palette.text }]}>Ledgerline</Text>
+            <Text style={[styles.brandTagline, { color: palette.textSubtle }]}>
+              A PRIVATE LEDGER
+            </Text>
             <Text style={[styles.brandSub, { color: palette.textSubtle }]} numberOfLines={1}>
               {householdName}
             </Text>
@@ -134,6 +137,9 @@ export function Sidebar<T extends string>({
         </View>
         <View style={{ flex: 1 }}>
           <Text style={[styles.brandName, { color: palette.text }]}>Ledgerline</Text>
+          <Text style={[styles.brandTagline, { color: palette.textSubtle }]}>
+            A PRIVATE LEDGER
+          </Text>
           <Text style={[styles.brandSub, { color: palette.textSubtle }]} numberOfLines={1}>
             {householdName}
           </Text>
@@ -252,8 +258,10 @@ export function Sidebar<T extends string>({
           </View>
         </View>
         <Text style={[styles.footerText, { color: palette.textSubtle }]}>
-          Your ledger lives on this device. Press ⌘K (Ctrl+K on Windows/Linux) to
-          search commands.
+          Your ledger lives on this device. Press{' '}
+          <Text style={{ fontFamily: typography.fontFamilyMono }}>⌘K</Text> (
+          <Text style={{ fontFamily: typography.fontFamilyMono }}>Ctrl+K</Text> on
+          Windows/Linux) to search commands.
         </Text>
       </View>
     </View>
@@ -296,11 +304,22 @@ const styles = StyleSheet.create({
   },
   brandMarkText: {
     fontSize: typography.subtitle,
-    fontWeight: '800',
+    fontWeight: '600',
+    fontFamily: typography.fontFamilyDisplay,
   },
   brandName: {
     fontSize: typography.subtitle,
     fontWeight: '800',
+    fontFamily: typography.fontFamilyDisplay,
+    textTransform: 'uppercase',
+    letterSpacing: 0.18 * typography.subtitle,
+  },
+  brandTagline: {
+    fontSize: 10,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.28 * 10,
+    marginTop: 2,
   },
   brandSub: {
     fontSize: typography.micro,
@@ -351,7 +370,7 @@ const styles = StyleSheet.create({
   sectionHeader: {
     fontSize: 10,
     fontWeight: '800',
-    letterSpacing: 1.4,
+    letterSpacing: 0.22 * 10,
     textTransform: 'uppercase',
     paddingHorizontal: spacing.sm,
     marginBottom: 4,
@@ -431,6 +450,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 0.3,
+    fontFamily: typography.fontFamilyMono,
   },
   topbar: {
     borderBottomWidth: 1,

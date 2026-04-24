@@ -5,11 +5,14 @@ import { dirname, resolve } from 'node:path';
 import test from 'node:test';
 
 import {
+  inferStatementYear,
   parseDelimitedStatement,
   parseDelimitedWithMapping,
+  parsePdfPagesToRows,
   parseStatementText,
   suggestColumnRoles,
 } from './import.shared';
+import type { PdfPageLine, PdfPageLines } from './types';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixturePath = (name: string) => resolve(here, '..', '..', 'fixtures', 'statements', name);
@@ -84,6 +87,145 @@ test('suggestColumnRoles handles Wells Fargo slash headers', () => {
   assert.equal(roles[1], 'payee');
   assert.equal(roles[2], 'credit');
   assert.equal(roles[3], 'debit');
+});
+
+/**
+ * Helper for building synthetic Wells Fargo-style PDF pages for tests.
+ * Each row is `[xPosition, text]` pairs; we wrap them up as PdfPageLineItem
+ * arrays and compute `text` by joining the strings with spaces (which is
+ * what the real `readPdfPages` extractor produces).
+ */
+function pdfLine(items: Array<[number, string]>): PdfPageLine {
+  return {
+    text: items.map(([, s]) => s).join(' ').replace(/\s+/g, ' ').trim(),
+    items: items.map(([x, str]) => ({ x, str })),
+  };
+}
+
+function pdfPages(lines: PdfPageLine[]): PdfPageLines[] {
+  return [{ lines }];
+}
+
+test('inferStatementYear pulls year from "Statement period 01/01/2024 to ..." headers', () => {
+  const pages = pdfPages([
+    pdfLine([[40, 'Wells Fargo Everyday Checking']]),
+    pdfLine([[40, 'Statement period activity from 01/01/2024 to 01/31/2024']]),
+    pdfLine([[40, 'Account number 1234567890']]),
+  ]);
+  assert.equal(inferStatementYear(pages), 2024);
+});
+
+test('inferStatementYear ignores "Member FDIC since 1929"-style noise and picks the statement year', () => {
+  const pages = pdfPages([
+    pdfLine([[40, 'Wells Fargo Bank, N.A. Member FDIC since 1929']]),
+    pdfLine([[40, 'January 1, 2024 - January 31, 2024']]),
+  ]);
+  assert.equal(inferStatementYear(pages), 2024);
+});
+
+test('parsePdfPagesToRows handles a Wells-Fargo-style transaction page', () => {
+  // Mimic the spatial layout of a real WF "Transaction history" page:
+  // - Statement-period line at top (gives the year)
+  // - "Beginning balance on 1/1" line (must be skipped)
+  // - Header row with Date/Description/Deposits/Withdrawals/Balance columns
+  // - Date-led transaction rows; deposits at x≈360, withdrawals at x≈460,
+  //   balance at x≈540
+  const pages = pdfPages([
+    pdfLine([[40, 'Statement period activity from 01/01/2024 to 01/31/2024']]),
+    pdfLine([
+      [40, 'Date'],
+      [120, 'Description'],
+      [350, 'Deposits/Additions'],
+      [450, 'Withdrawals/Subtractions'],
+      [540, 'Ending Daily Balance'],
+    ]),
+    pdfLine([
+      [40, '1/1'],
+      [120, 'Beginning balance on 1/1'],
+      [540, '5,000.00'],
+    ]),
+    pdfLine([
+      [40, '1/2'],
+      [120, 'Wire Trans Svc Charge'],
+      [460, '15.00'],
+      [540, '4,985.00'],
+    ]),
+    pdfLine([
+      [40, '1/2'],
+      [120, 'WT Fed#06223 Mvb Bank Inc Org=Payward Ventures Inc'],
+      [360, '2,496.00'],
+      [540, '7,481.00'],
+    ]),
+    pdfLine([
+      [40, '1/5'],
+      [120, 'Atlas Manufacturing Direct Deposit'],
+      [360, '682.52'],
+      [540, '8,163.52'],
+    ]),
+    pdfLine([[120, 'Ending balance on 1/31'], [540, '8,163.52']]),
+  ]);
+
+  const rows = parsePdfPagesToRows(pages);
+  assert.equal(rows.length, 3, 'beginning + ending balance lines must be skipped');
+
+  const charge = rows.find((r) => r.payee.includes('Wire Trans Svc Charge'));
+  assert.ok(charge, 'wire fee row must parse');
+  assert.equal(charge!.amount, -15, 'withdrawal column → negative amount');
+  assert.equal(charge!.date, '2024-01-02', 'MM/DD-only date must use inferred statement year');
+
+  const deposit = rows.find((r) => r.payee.includes('Payward Ventures'));
+  assert.ok(deposit, 'wire deposit row must parse');
+  assert.equal(deposit!.amount, 2496, 'deposit column → positive amount');
+  assert.equal(deposit!.date, '2024-01-02');
+
+  const payroll = rows.find((r) => r.payee.includes('Atlas Manufacturing'));
+  assert.ok(payroll);
+  assert.equal(payroll!.amount, 682.52);
+});
+
+test('parseStatementText handles a 3-column "date description deposit withdrawal balance" line', () => {
+  // No spatial info — just text. The trailing balance must NOT be picked
+  // as the transaction amount.
+  const text = [
+    'Statement period 01/01/2024 to 01/31/2024',
+    '1/2 Wire Trans Svc Charge   15.00 4,985.00',
+    '1/5 Atlas Manufacturing Direct Deposit 682.52  8,163.52',
+  ].join('\n');
+
+  const batch = parseStatementText(text);
+  assert.equal(batch.format, 'pdf');
+  // Two transaction rows; statement-period line is not a transaction.
+  const txnRows = batch.rows.filter(
+    (r) => !r.payee.toLowerCase().startsWith('statement period'),
+  );
+  assert.ok(txnRows.length >= 2, `expected at least 2 transactions, got ${txnRows.length}`);
+
+  const fee = txnRows.find((r) => r.payee.includes('Wire Trans Svc Charge'));
+  assert.ok(fee, 'wire fee should parse');
+  assert.equal(Math.abs(fee!.amount), 15, 'amount must be the transaction value (15), not the running balance');
+  assert.equal(fee!.date, '2024-01-02');
+
+  const payroll = txnRows.find((r) => r.payee.includes('Atlas Manufacturing'));
+  assert.ok(payroll);
+  assert.equal(payroll!.amount, 682.52);
+});
+
+test('parseStatementText skips beginning/ending balance lines even when they look like transactions', () => {
+  const text = [
+    'Statement period 01/01/2024 to 01/31/2024',
+    'Beginning balance on 1/1 5,000.00',
+    '1/2 Coffee Shop -4.75',
+    'Ending balance on 1/31 4,995.25',
+  ].join('\n');
+
+  const batch = parseStatementText(text);
+  const txnRows = batch.rows.filter(
+    (r) =>
+      !/beginning balance|ending balance|statement period/i.test(r.payee),
+  );
+  assert.equal(txnRows.length, 1, 'only the coffee row should parse');
+  assert.equal(txnRows[0]!.payee, 'Coffee Shop');
+  assert.equal(txnRows[0]!.amount, -4.75);
 });
 
 test('tolerates alternate bank wording ("Post Date", "Transaction", "Amount (USD)")', () => {

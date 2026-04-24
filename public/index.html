@@ -5,6 +5,9 @@
     <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
     <title>%WEB_TITLE%</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
     <link rel="manifest" href="/manifest.json" />
     <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
     <style id="expo-reset">
@@ -17,7 +20,7 @@
       body {
         overflow: hidden;
         margin: 0;
-        background: #071218;
+        background: #0a0608;
       }
       /* The root element for your Expo app — must paint above the boot overlay */
       #root {
@@ -37,24 +40,24 @@
         justify-content: center;
         flex-direction: column;
         gap: 12px;
-        background: #071218;
-        color: #eff7f4;
-        font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+        background: #0a0608;
+        color: #f1e4cf;
+        font-family: 'Cinzel', Georgia, serif;
         padding: 24px;
         text-align: center;
       }
       #ledgerline-boot p {
         margin: 0;
         font-size: 15px;
-        color: #b9ccd0;
+        color: #a89074;
         max-width: 22rem;
         line-height: 1.45;
       }
       #ledgerline-boot .spinner {
         width: 36px;
         height: 36px;
-        border: 3px solid #27444f;
-        border-top-color: #d4e37d;
+        border: 3px solid #3a2228;
+        border-top-color: #c9a14a;
         border-radius: 50%;
         animation: ledgerline-spin 0.85s linear infinite;
       }
@@ -67,13 +70,13 @@
         display: none;
       }
       #ledgerline-boot.error h1 {
-        color: #d97e68;
+        color: #c9a14a;
         font-size: 18px;
       }
       #ledgerline-boot.error pre {
         text-align: left;
         font-size: 12px;
-        color: #94bdc4;
+        color: #a89074;
         white-space: pre-wrap;
         word-break: break-word;
         max-width: 100%;
@@ -88,8 +91,9 @@
     </noscript>
     <div id="ledgerline-boot" aria-live="polite">
       <div class="spinner" aria-hidden="true"></div>
-      <strong style="font-size: 17px">Ledgerline Finance</strong>
-      <p>Loading…</p>
+      <strong style="font-size: 22px; letter-spacing: 0.18em; text-transform: uppercase;">Ledgerline</strong>
+      <small style="font-size: 11px; letter-spacing: 0.32em; color: #6b5746; text-transform: uppercase;">A private ledger</small>
+      <p>Unsealing the ledger…</p>
     </div>
     <!-- The root element for your Expo app. -->
     <div id="root"></div>

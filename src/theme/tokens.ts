@@ -34,63 +34,63 @@ export interface ThemePalette {
 }
 
 const dark: ThemePalette = {
-  bg: '#07090f',
-  bgElevated: '#0c111d',
-  surface: '#111827',
-  surfaceRaised: '#18223a',
-  surfaceSunken: '#0a0f1c',
-  border: '#27324d',
-  borderSoft: '#1b2238',
-  text: '#f4f6ff',
-  textMuted: '#b9c1db',
-  textSubtle: '#7a859f',
-  primary: '#7c8cff',
-  primaryText: '#0a0f1c',
-  primarySoft: 'rgba(124,140,255,0.16)',
-  primaryStrong: '#5467ff',
-  accent: '#8d7dff',
-  accentSoft: 'rgba(141,125,255,0.18)',
-  success: '#34d399',
-  successSoft: 'rgba(52,211,153,0.15)',
-  warning: '#f5b44b',
-  warningSoft: 'rgba(245,180,75,0.18)',
-  danger: '#ff6e7f',
-  dangerSoft: 'rgba(255,110,127,0.16)',
-  info: '#58b7ff',
-  infoSoft: 'rgba(88,183,255,0.16)',
-  overlay: 'rgba(2,4,10,0.72)',
-  heroGradientStart: '#5467ff',
-  heroGradientEnd: '#8d7dff',
+  bg: '#0a0608',
+  bgElevated: '#120c0e',
+  surface: '#181113',
+  surfaceRaised: '#221619',
+  surfaceSunken: '#0d0809',
+  border: '#3a2228',
+  borderSoft: '#241418',
+  text: '#f1e4cf',
+  textMuted: '#a89074',
+  textSubtle: '#6b5746',
+  primary: '#c9a14a',
+  primaryText: '#0a0608',
+  primarySoft: 'rgba(201,161,74,0.14)',
+  primaryStrong: '#e6bc5e',
+  accent: '#7d2c2c',
+  accentSoft: 'rgba(125,44,44,0.20)',
+  success: '#5a9070',
+  successSoft: 'rgba(90,144,112,0.16)',
+  warning: '#c9a14a',
+  warningSoft: 'rgba(201,161,74,0.18)',
+  danger: '#9c3a3a',
+  dangerSoft: 'rgba(156,58,58,0.18)',
+  info: '#7e8a9c',
+  infoSoft: 'rgba(126,138,156,0.18)',
+  overlay: 'rgba(0,0,0,0.82)',
+  heroGradientStart: '#1a0d10',
+  heroGradientEnd: '#3a1a1f',
 };
 
 const light: ThemePalette = {
-  bg: '#f4f5fb',
-  bgElevated: '#ffffff',
-  surface: '#ffffff',
+  bg: '#f1e8d4',
+  bgElevated: '#f8f1de',
+  surface: '#fbf4e0',
   surfaceRaised: '#ffffff',
-  surfaceSunken: '#eef1f8',
-  border: '#dde3ee',
-  borderSoft: '#ebeef6',
-  text: '#0f1428',
-  textMuted: '#454d69',
-  textSubtle: '#7b849f',
-  primary: '#4a5bf0',
-  primaryText: '#ffffff',
-  primarySoft: 'rgba(74,91,240,0.10)',
-  primaryStrong: '#3345d4',
-  accent: '#7b6dff',
-  accentSoft: 'rgba(123,109,255,0.12)',
-  success: '#12a26a',
-  successSoft: 'rgba(18,162,106,0.10)',
-  warning: '#c77512',
-  warningSoft: 'rgba(199,117,18,0.12)',
-  danger: '#c83a31',
-  dangerSoft: 'rgba(200,58,49,0.10)',
-  info: '#1f8fd1',
-  infoSoft: 'rgba(31,143,209,0.12)',
-  overlay: 'rgba(16,20,35,0.40)',
-  heroGradientStart: '#4a5bf0',
-  heroGradientEnd: '#7b6dff',
+  surfaceSunken: '#e7dcc4',
+  border: '#b8a87f',
+  borderSoft: '#d4c5a0',
+  text: '#1a0d10',
+  textMuted: '#5a4338',
+  textSubtle: '#8a7460',
+  primary: '#7d2c2c',
+  primaryText: '#fbf4e0',
+  primarySoft: 'rgba(125,44,44,0.10)',
+  primaryStrong: '#5a1d1d',
+  accent: '#a17a2a',
+  accentSoft: 'rgba(161,122,42,0.14)',
+  success: '#3d6b50',
+  successSoft: 'rgba(61,107,80,0.10)',
+  warning: '#9c6f1c',
+  warningSoft: 'rgba(156,111,28,0.12)',
+  danger: '#8a2828',
+  dangerSoft: 'rgba(138,40,40,0.10)',
+  info: '#4a566a',
+  infoSoft: 'rgba(74,86,106,0.12)',
+  overlay: 'rgba(26,13,16,0.50)',
+  heroGradientStart: '#7d2c2c',
+  heroGradientEnd: '#a17a2a',
 };
 
 export const palettes: Record<ThemeMode, ThemePalette> = { light, dark };
@@ -122,36 +122,45 @@ export const typography = {
   body: 14,
   small: 12,
   micro: 11,
+  fontFamilyDisplay: '"Cinzel", "Cormorant Garamond", Georgia, serif',
+  fontFamilyBody: '"Cormorant Garamond", "Iowan Old Style", Georgia, serif',
+  fontFamilyUi: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+  fontFamilyMono: '"IBM Plex Mono", "JetBrains Mono", ui-monospace, monospace',
 } as const;
 
 /** Elevation shadows. Web gets real box-shadow; native falls back to elevation. */
 export function elevation(level: 1 | 2 | 3, mode: ThemeMode = 'dark') {
   if (Platform.OS === 'web') {
-    const alpha = mode === 'dark' ? 0.55 : 0.14;
-    const blur = level === 1 ? 8 : level === 2 ? 20 : 40;
-    const y = level === 1 ? 2 : level === 2 ? 10 : 24;
+    if (mode === 'dark') {
+      const blur = level === 1 ? 8 : level === 2 ? 22 : 44;
+      const y = level === 1 ? 2 : level === 2 ? 12 : 26;
+      const goldGlow = level === 3 ? ', 0 0 1px rgba(201,161,74,0.30)' : '';
+      return {
+        boxShadow: `0 ${y}px ${blur}px rgba(0,0,0,0.65)${goldGlow}` as unknown as undefined,
+      };
+    }
+    const blur = level === 1 ? 6 : level === 2 ? 18 : 36;
+    const y = level === 1 ? 2 : level === 2 ? 8 : 20;
     return {
-      boxShadow: `0 ${y}px ${blur}px rgba(5, 10, 30, ${alpha})` as unknown as undefined,
+      boxShadow: `0 ${y}px ${blur}px rgba(60,40,20,0.18)` as unknown as undefined,
     };
   }
-  return {
-    elevation: level * 2,
-  };
+  return { elevation: level * 2 };
 }
 
 export const categoryColors: Record<string, string> = {
-  Income: '#34d399',
-  Housing: '#7c8cff',
-  Utilities: '#f5b44b',
-  Groceries: '#58b7ff',
-  Dining: '#ff6e7f',
-  Fuel: '#8d7dff',
-  Travel: '#2ad1c3',
-  Subscriptions: '#d26de6',
-  Shopping: '#ff9f4a',
-  Health: '#e05784',
-  Transfer: '#7a859f',
-  Fees: '#b85252',
-  Savings: '#2fb8a0',
-  Other: '#9099b5',
+  Income: '#5a9070',
+  Housing: '#7d2c2c',
+  Utilities: '#c9a14a',
+  Groceries: '#5a7d8c',
+  Dining: '#9c3a3a',
+  Fuel: '#6b5a8c',
+  Travel: '#3d6b6b',
+  Subscriptions: '#8c4a7d',
+  Shopping: '#c9743a',
+  Health: '#a83a5a',
+  Transfer: '#7e8a9c',
+  Fees: '#7d2c2c',
+  Savings: '#3d6b50',
+  Other: '#8a7460',
 };
