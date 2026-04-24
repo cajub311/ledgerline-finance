@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 
 import { CommandPalette, type CommandAction } from './components/CommandPalette';
+import { WebAccessGate } from './components/WebAccessGate';
 import { Sidebar, type NavItem, type SidebarSummary } from './components/layout/Sidebar';
 import { buildTransactionsCsv } from './finance/export';
 import { serializeFinanceState } from './finance/backup';
@@ -63,7 +64,9 @@ const TAB_ROUTES: ReadonlyArray<NavItem<Tab>> = [
 export default function FinanceApp() {
   return (
     <ThemeProvider>
-      <AppShell />
+      <WebAccessGate>
+        <AppShell />
+      </WebAccessGate>
     </ThemeProvider>
   );
 }
