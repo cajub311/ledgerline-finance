@@ -785,17 +785,35 @@ export function parsePdfPagesToRows(pages: PdfPageLines[]): ParsedStatementRow[]
         continue;
       }
 
-      const firstToken = items[0].str.trim();
+      // pdfjs sometimes splits a date like "1/2" or "1/2/24" across two or
+      // three consecutive text items (e.g. "1/" + "2" or "1" + "/" + "2").
+      // Try to coalesce the first few items into a date token before
+      // giving up on the row.
+      const tryLeadingDate = (): { date: string; consumed: number } | null => {
+        const maxCombine = Math.min(items.length, 4);
+        for (let take = 1; take <= maxCombine; take += 1) {
+          const combined = items
+            .slice(0, take)
+            .map((it) => it.str.trim())
+            .join('')
+            .replace(/\s+/g, '');
+          if (DATE_TOKEN.test(combined)) {
+            const date = parseDate(combined, fallbackYear);
+            if (date) return { date, consumed: take };
+          }
+        }
+        return null;
+      };
 
-      if (DATE_TOKEN.test(firstToken)) {
+      const leadingDate = tryLeadingDate();
+
+      if (leadingDate) {
         flushPending();
-        const date = parseDate(firstToken, fallbackYear);
-        if (!date) continue;
 
         const descParts: string[] = [];
         let amount: number | null = null;
 
-        for (let i = 1; i < items.length; i += 1) {
+        for (let i = leadingDate.consumed; i < items.length; i += 1) {
           const token = items[i].str.trim();
           if (!token) continue;
           if (AMOUNT_TOKEN.test(token)) {
@@ -808,12 +826,19 @@ export function parsePdfPagesToRows(pages: PdfPageLines[]): ParsedStatementRow[]
               amount = -Math.abs(parsed);
             }
             // balance or unclassified: ignore
+          } else if (/^\d{3,6}$/.test(token) && descParts.length === 0) {
+            // Wells Fargo and similar statements print a Check Number
+            // column between the date and description. A bare 3-6 digit
+            // integer with no comma or decimal before any description
+            // text is almost certainly a check number — keep it but tag
+            // it so the payee doesn't read as just "1234".
+            descParts.push(`Check #${token}`);
           } else {
             descParts.push(token);
           }
         }
 
-        pending = { date, descParts, amount };
+        pending = { date: leadingDate.date, descParts, amount };
         continue;
       }
 

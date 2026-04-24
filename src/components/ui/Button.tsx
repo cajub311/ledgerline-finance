@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 
 import { useTheme } from '../../theme/ThemeContext';
 import { radius, spacing, typography } from '../../theme/tokens';
@@ -46,24 +46,45 @@ export function Button({
         : variant === 'success'
           ? palette.success
           : variant === 'secondary'
-            ? palette.surfaceSunken
+            ? palette.surfaceRaised
             : 'transparent';
 
   const color =
-    variant === 'primary' || variant === 'danger' || variant === 'success'
+    variant === 'primary'
       ? palette.primaryText
-      : palette.text;
+      : variant === 'danger' || variant === 'success'
+        ? '#fff'
+        : variant === 'ghost'
+          ? palette.textMuted
+          : palette.text;
 
   const borderColor =
-    variant === 'secondary'
-      ? palette.border
-      : variant === 'ghost'
+    variant === 'primary'
+      ? palette.primaryStrong
+      : variant === 'secondary'
         ? palette.border
-        : bg;
+        : variant === 'ghost'
+          ? 'transparent'
+          : variant === 'danger'
+            ? palette.danger
+            : variant === 'success'
+              ? palette.success
+              : bg;
+
+  const hoverBorderColor =
+    variant === 'ghost' || variant === 'secondary' ? palette.border : borderColor;
 
   const paddingV = size === 'sm' ? 6 : size === 'lg' ? 14 : 10;
   const paddingH = size === 'sm' ? 12 : size === 'lg' ? 22 : 16;
   const fontSize = size === 'sm' ? typography.small : typography.body;
+
+  const shadow =
+    Platform.OS === 'web' && (variant === 'primary' || variant === 'danger' || variant === 'success')
+      ? ({
+          boxShadow:
+            '0 1px 0 rgba(255,220,150,0.25) inset, 0 2px 8px rgba(0,0,0,0.4)',
+        } as unknown as ViewStyle)
+      : null;
 
   return (
     <Pressable
@@ -77,18 +98,30 @@ export function Button({
         styles.shell,
         {
           backgroundColor: bg,
-          borderColor,
+          borderColor: hovered ? hoverBorderColor : borderColor,
           paddingVertical: paddingV,
           paddingHorizontal: paddingH,
           opacity: disabled ? 0.5 : pressed ? 0.85 : hovered ? 0.92 : 1,
           alignSelf: fullWidth ? 'stretch' : 'flex-start',
           width: fullWidth ? '100%' : undefined,
         },
+        shadow,
         style,
       ]}
     >
       {leading ? <View>{leading}</View> : null}
-      <Text style={[styles.label, { color, fontSize }]}>{label}</Text>
+      <Text
+        style={[
+          styles.label,
+          {
+            color,
+            fontSize,
+            fontFamily: typography.fontFamilyUi,
+          },
+        ]}
+      >
+        {label}
+      </Text>
       {trailing ? <View>{trailing}</View> : null}
     </Pressable>
   );
@@ -100,10 +133,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.sm,
-    borderRadius: radius.md,
+    borderRadius: radius.sm,
     borderWidth: 1,
   },
   label: {
-    fontWeight: '700',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
   },
 });

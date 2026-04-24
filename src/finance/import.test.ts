@@ -183,6 +183,66 @@ test('parsePdfPagesToRows handles a Wells-Fargo-style transaction page', () => {
   assert.equal(payroll!.amount, 682.52);
 });
 
+test('parsePdfPagesToRows coalesces a split date token ("1/" + "2") back into a date', () => {
+  // pdfjs sometimes splits "1/2" across two items — the parser must rejoin
+  // them before testing against DATE_TOKEN, otherwise the row is dropped.
+  const pages = pdfPages([
+    pdfLine([[40, 'Statement period 01/01/2024 to 01/31/2024']]),
+    pdfLine([
+      [40, 'Date'],
+      [120, 'Description'],
+      [350, 'Deposits/Additions'],
+      [450, 'Withdrawals/Subtractions'],
+      [540, 'Ending Daily Balance'],
+    ]),
+    pdfLine([
+      [40, '1/'],
+      [52, '2'],
+      [120, 'Split Date Merchant'],
+      [460, '12.34'],
+      [540, '4,987.66'],
+    ]),
+  ]);
+
+  const rows = parsePdfPagesToRows(pages);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.date, '2024-01-02');
+  assert.equal(rows[0]?.payee, 'Split Date Merchant');
+  assert.equal(rows[0]?.amount, -12.34);
+});
+
+test('parsePdfPagesToRows treats a bare 3-6 digit integer as a check number, not the amount', () => {
+  // WF's "Transaction history" often has a Check Number column between
+  // Date and Description. We tag it as "Check #…" in the payee so a
+  // customer can still search for it, and we do NOT pick it up as the
+  // transaction amount.
+  const pages = pdfPages([
+    pdfLine([[40, 'Statement period 01/01/2024 to 01/31/2024']]),
+    pdfLine([
+      [40, 'Date'],
+      [120, 'Check #'],
+      [180, 'Description'],
+      [350, 'Deposits/Additions'],
+      [450, 'Withdrawals/Subtractions'],
+      [540, 'Ending Daily Balance'],
+    ]),
+    pdfLine([
+      [40, '1/8'],
+      [120, '1234'],
+      [180, 'Home Depot'],
+      [460, '42.19'],
+      [540, '4,945.47'],
+    ]),
+  ]);
+
+  const rows = parsePdfPagesToRows(pages);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.date, '2024-01-08');
+  assert.match(rows[0]!.payee, /Check #1234/);
+  assert.match(rows[0]!.payee, /Home Depot/);
+  assert.equal(rows[0]!.amount, -42.19, 'the 42.19 withdrawal, not 1234, is the amount');
+});
+
 test('parseStatementText handles a 3-column "date description deposit withdrawal balance" line', () => {
   // No spatial info — just text. The trailing balance must NOT be picked
   // as the transaction amount.

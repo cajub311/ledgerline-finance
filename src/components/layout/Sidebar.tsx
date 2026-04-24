@@ -194,12 +194,24 @@ export function Sidebar<T extends string>({
         contentContainerStyle={{ gap: spacing.md, paddingBottom: spacing.lg }}
         showsVerticalScrollIndicator={false}
       >
-        {grouped.map(({ section, items: sectionItems }) => (
+        {grouped.map(({ section, items: sectionItems }, sectionIndex) => (
           <View key={section || 'root'} style={{ gap: 4 }}>
             {section ? (
-              <Text style={[styles.sectionHeader, { color: palette.textSubtle }]}>
-                {section}
-              </Text>
+              <View style={{ gap: 4, marginTop: sectionIndex > 0 ? spacing.sm : 0 }}>
+                {sectionIndex > 0 ? (
+                  <View
+                    style={{
+                      height: 1,
+                      backgroundColor: palette.borderSoft,
+                      opacity: 0.5,
+                      marginBottom: spacing.sm,
+                    }}
+                  />
+                ) : null}
+                <Text style={[styles.sectionHeader, { color: palette.textSubtle }]}>
+                  {section}
+                </Text>
+              </View>
             ) : null}
             {sectionItems.map((item) => {
               const active = item.value === activeValue;

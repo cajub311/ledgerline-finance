@@ -67,6 +67,14 @@ export function Modal({ visible, onClose, title, subtitle, children, footer, wid
               </Pressable>
             </View>
           ) : null}
+          {title ? (
+            <View
+              style={[
+                styles.rule,
+                { backgroundColor: palette.primary },
+              ]}
+            />
+          ) : null}
           <ScrollView
             contentContainerStyle={{ gap: spacing.md }}
             style={{ maxHeight: narrow ? windowHeight * 0.72 : 520 }}
@@ -90,7 +98,7 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
   card: {
-    borderRadius: radius.xl,
+    borderRadius: radius.md,
     borderWidth: 1,
     padding: spacing.xl,
     gap: spacing.lg,
@@ -102,11 +110,19 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: typography.title,
-    fontWeight: '800',
+    fontWeight: '600',
+    fontFamily: typography.fontFamilyDisplay,
+    textTransform: 'uppercase',
+    letterSpacing: 1.6,
   },
   subtitle: {
     fontSize: typography.small,
     marginTop: 4,
+  },
+  rule: {
+    height: 1,
+    opacity: 0.4,
+    marginVertical: spacing.sm,
   },
   close: {
     padding: spacing.xs,

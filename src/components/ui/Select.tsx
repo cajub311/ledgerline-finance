@@ -33,7 +33,7 @@ export function Select<T extends string>({ label, value, options, onChange, styl
                 styles.chip,
                 {
                   backgroundColor: selected ? palette.primary : palette.surfaceSunken,
-                  borderColor: selected ? palette.primary : palette.border,
+                  borderColor: selected ? palette.primaryStrong : palette.border,
                   opacity: hovered && !selected ? 0.9 : 1,
                 },
               ]}
@@ -41,7 +41,7 @@ export function Select<T extends string>({ label, value, options, onChange, styl
               <Text
                 style={[
                   styles.chipText,
-                  { color: selected ? palette.primaryText : palette.text },
+                  { color: selected ? palette.primaryText : palette.textMuted },
                 ]}
               >
                 {option.icon ? `${option.icon}  ` : ''}
@@ -62,6 +62,9 @@ const styles = StyleSheet.create({
   label: {
     fontSize: typography.small,
     fontWeight: '600',
+    fontFamily: typography.fontFamilyDisplay,
+    textTransform: 'uppercase',
+    letterSpacing: 1.6,
   },
   chips: {
     flexDirection: 'row',
@@ -69,13 +72,15 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   chip: {
-    borderRadius: radius.pill,
+    borderRadius: radius.sm,
     borderWidth: 1,
     paddingVertical: 6,
     paddingHorizontal: 12,
   },
   chipText: {
-    fontSize: typography.small,
+    fontSize: typography.micro,
     fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 1.4,
   },
 });

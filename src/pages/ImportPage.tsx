@@ -490,10 +490,11 @@ export function ImportPage({ state, onStateChange }: ImportPageProps) {
           ]}
         >
           <Text style={[styles.dropTitle, { color: palette.text }]}>
-            Drag & drop statements here
+            Commit your statements to the ledger
           </Text>
           <Text style={[styles.dropSub, { color: palette.textSubtle }]}>
-            CSV · XLSX · PDF — multi-file, headers auto-detected, duplicates skipped by date + payee + amount.
+            CSV · XLSX · PDF — Wells Fargo, Chase, Bank of America, Amex and most banks parse out of the box.
+            Multi-file, headers auto-detected, duplicates skipped by date + payee + amount.
           </Text>
           <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm, flexWrap: 'wrap' }}>
             <Button
