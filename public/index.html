@@ -82,6 +82,9 @@
         max-width: 22rem;
         line-height: 1.45;
       }
+      #ledgerline-boot .spinner-wrap {
+        margin-top: 8px;
+      }
       #ledgerline-boot .spinner {
         width: 36px;
         height: 36px;
@@ -103,6 +106,7 @@
         color: #c084fc;
         font-size: 18px;
       }
+      #ledgerline-boot.error .spinner-wrap { display: none; }
       #ledgerline-boot.error pre {
         text-align: left;
         font-size: 12px;
@@ -120,7 +124,9 @@
       You need to enable JavaScript to run this app.
     </noscript>
     <div id="ledgerline-boot" aria-live="polite">
-      <div class="spinner" aria-hidden="true"></div>
+      <div class="spinner-wrap">
+        <div class="spinner" aria-hidden="true"></div>
+      </div>
       <strong style="font-size: 22px; letter-spacing: 0.18em; text-transform: uppercase;">Ledgerline</strong>
       <small style="font-size: 11px; letter-spacing: 0.32em; color: #6b5746; text-transform: uppercase;">A private ledger</small>
       <p>Unsealing the ledger…</p>

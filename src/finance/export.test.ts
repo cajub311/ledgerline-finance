@@ -21,7 +21,7 @@ test('buildTransactionsCsv respects a filtered subset', () => {
   const lines = csv.trim().split('\n');
   // Header + 2 rows
   assert.equal(lines.length, 3);
-  assert.match(lines[0], /^date,payee,amount/);
+  assert.match(lines[0], /^date,payee,amount,debit,credit,category/);
 });
 
 test('QIF emits one block per transaction with header for the account type', () => {
@@ -56,9 +56,18 @@ test('CSV export surfaces transaction tags in a dedicated column', () => {
   let state = seedState();
   state = setTransactionsTags(state, [state.transactions[0].id], ['trip-2026', 'tax']);
   const csv = buildTransactionsCsv(state, { transactions: [state.transactions[0]] });
-  const [header, row] = csv.split('\n');
-  assert.match(header, /tags$/);
+  const [header, row] = csv.split(/\r?\n/);
+  assert.match(header, /tags,transaction_id$/);
   assert.match(row, /trip-2026 tax/);
+});
+
+test('buildTransactionsCsv includes transaction_id column', () => {
+  const state = seedState();
+  const tx = state.transactions[0];
+  const csv = buildTransactionsCsv(state, { transactions: [tx] });
+  const [header, row] = csv.split(/\r?\n/);
+  assert.match(header, /transaction_id$/);
+  assert.ok(row.endsWith(tx.id));
 });
 
 test('QIF memo line includes notes and #tag suffixes so round-trips are safe', () => {

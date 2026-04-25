@@ -10,6 +10,7 @@ import {
   createEmptyFinanceState,
   createFinanceState,
   detectTransfers,
+  editTransaction,
   getAllTags,
   getBudgetEnvelopes,
   getBudgetStatus,
@@ -58,6 +59,15 @@ test('manual transactions are added to the selected account', () => {
 
   assert.equal(nextState.transactions.length, state.transactions.length + 1);
   assert.equal(nextState.transactions[0]?.payee, 'Coffee Shop');
+});
+
+test('editTransaction delegates to updateTransaction for payee and amount', () => {
+  const state = createFinanceState();
+  const id = state.transactions[0]!.id;
+  const next = editTransaction(state, id, { payee: '  New Payee  ', amount: -12.34 });
+  const tx = next.transactions.find((t) => t.id === id);
+  assert.equal(tx?.payee, 'New Payee');
+  assert.equal(tx?.amount, -12.34);
 });
 
 test('imported rows dedupe against existing transactions', () => {

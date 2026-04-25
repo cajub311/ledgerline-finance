@@ -6,26 +6,32 @@ import type {
 } from './types';
 
 function escapeCsv(value: string): string {
-  if (/[",\n]/.test(value)) {
+  if (/[",\n\r]/.test(value)) {
     return `"${value.replace(/"/g, '""')}"`;
   }
-
   return value;
 }
 
 function transactionToRow(state: FinanceState, transaction: FinanceTransaction): string[] {
   const account = state.accounts.find((entry) => entry.id === transaction.accountId);
+  const isIncome = transaction.amount > 0;
+  const debit = isIncome ? '' : Math.abs(transaction.amount).toFixed(2);
+  const credit = isIncome ? transaction.amount.toFixed(2) : '';
 
   return [
     transaction.date,
     transaction.payee,
     transaction.amount.toFixed(2),
+    debit,
+    credit,
     transaction.category,
     account?.name ?? transaction.accountId,
-    transaction.reviewed ? 'yes' : 'no',
+    account?.institution ?? '',
+    transaction.reviewed ? 'Yes' : 'No',
     transaction.source,
     transaction.notes ?? '',
     (transaction.tags ?? []).join(' '),
+    transaction.id,
   ];
 }
 
@@ -37,7 +43,21 @@ export interface CsvBuildOptions {
 export function buildTransactionsCsv(state: FinanceState, options: CsvBuildOptions = {}): string {
   const source = options.transactions ?? state.transactions;
   const rows = [
-    ['date', 'payee', 'amount', 'category', 'account', 'reviewed', 'source', 'notes', 'tags'],
+    [
+      'date',
+      'payee',
+      'amount',
+      'debit',
+      'credit',
+      'category',
+      'account',
+      'institution',
+      'reviewed',
+      'source',
+      'notes',
+      'tags',
+      'transaction_id',
+    ],
     ...source
       .slice()
       .sort((left, right) => right.date.localeCompare(left.date))
@@ -46,7 +66,7 @@ export function buildTransactionsCsv(state: FinanceState, options: CsvBuildOptio
 
   return rows
     .map((row) => row.map((value) => escapeCsv(value)).join(','))
-    .join('\n');
+    .join('\r\n');
 }
 
 // ─── QIF (Quicken Interchange Format) ────────────────────────────────────────

@@ -456,6 +456,34 @@ export function updateTransaction(
   };
 }
 
+/** Subset patch shape compatible with the older redesign branch API. */
+export interface TransactionEdits {
+  payee?: string;
+  amount?: number;
+  date?: string;
+  category?: string;
+  notes?: string;
+}
+
+/** Apply field edits to one transaction (delegates to `updateTransaction`). */
+export function editTransaction(
+  state: FinanceState,
+  transactionId: string,
+  edits: TransactionEdits,
+): FinanceState {
+  const tx = state.transactions.find((t) => t.id === transactionId);
+  if (!tx) return state;
+  const patch: TransactionPatch = {};
+  if (edits.payee !== undefined && edits.payee.trim()) patch.payee = edits.payee.trim();
+  if (edits.amount !== undefined && Number.isFinite(edits.amount)) patch.amount = edits.amount;
+  if (edits.date !== undefined && edits.date.trim()) patch.date = edits.date.trim();
+  if (edits.category !== undefined && edits.category.trim()) {
+    patch.category = normalizeCategory(edits.category.trim(), tx.payee);
+  }
+  if (edits.notes !== undefined) patch.notes = edits.notes.trim() || undefined;
+  return updateTransaction(state, transactionId, patch);
+}
+
 export function deleteTransaction(state: FinanceState, transactionId: string): FinanceState {
   return {
     ...state,
@@ -824,18 +852,27 @@ export function getLatestTransactions(state: FinanceState, limit = 16): FinanceT
     .slice(0, limit);
 }
 
+const ACCOUNT_TYPE_META: Record<string, { icon: string; kindLabel: string; isLiability: boolean }> = {
+  checking:   { icon: '🏦', kindLabel: 'Checking',   isLiability: false },
+  savings:    { icon: '💰', kindLabel: 'Savings',    isLiability: false },
+  credit:     { icon: '💳', kindLabel: 'Credit Card', isLiability: true  },
+  cash:       { icon: '💵', kindLabel: 'Cash',        isLiability: false },
+  loan:       { icon: '📋', kindLabel: 'Loan',        isLiability: true  },
+  investment: { icon: '📈', kindLabel: 'Investment',  isLiability: false },
+};
+
 export function getAccountsWithBalances(
   state: FinanceState,
-): Array<FinanceAccount & { currentBalance: number; kindLabel: string }> {
-  return getAccountBalances(state).map((account) => ({
-    ...account,
-    kindLabel:
-      account.type === 'credit' || account.type === 'loan'
-        ? 'Liability'
-        : account.source === 'manual'
-          ? 'Manual'
-          : 'Imported',
-  }));
+): Array<FinanceAccount & { currentBalance: number; kindLabel: string; typeIcon: string; isLiability: boolean }> {
+  return getAccountBalances(state).map((account) => {
+    const meta = ACCOUNT_TYPE_META[account.type] ?? { icon: '🏦', kindLabel: 'Account', isLiability: false };
+    return {
+      ...account,
+      kindLabel: meta.kindLabel,
+      typeIcon: meta.icon,
+      isLiability: meta.isLiability,
+    };
+  });
 }
 
 export function getBudgetPills(state: FinanceState) {
