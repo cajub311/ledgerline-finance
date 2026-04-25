@@ -33,7 +33,7 @@ import {
 import { clearFinanceState } from '../finance/storage';
 import type { FinanceState, ProjectedRecurringItem } from '../finance/types';
 import { useTheme } from '../theme/ThemeContext';
-import { elevation, radius, spacing, typography } from '../theme/tokens';
+import { elevation, neonGlow, radius, spacing, typography } from '../theme/tokens';
 import { formatCurrency } from '../utils/format';
 
 interface DashboardPageProps {
@@ -203,8 +203,8 @@ export function DashboardPage({ state, onStateChange }: DashboardPageProps) {
           </Text>
           <Text style={[styles.demoBannerBody, { color: palette.textMuted }]}>
             {onDemoData
-              ? 'These accounts and transactions are examples shipped with the app. Wipe them any time to start fresh with your own data — importing on top keeps the demo mixed in.'
-              : `Tracking ${state.transactions.length} transaction${state.transactions.length === 1 ? '' : 's'} across ${state.accounts.length} account${state.accounts.length === 1 ? '' : 's'}. Reset any time to wipe everything and begin again.`}
+              ? 'These accounts and transactions are sample chronicles bundled with the app. Wipe them any time to start your own ledger — importing on top keeps the demo entries mingled in.'
+              : `${state.transactions.length} entr${state.transactions.length === 1 ? 'y' : 'ies'} chronicled across ${state.accounts.length} account${state.accounts.length === 1 ? '' : 's'}. Reset any time to seal the ledger and begin anew.`}
           </Text>
         </View>
         <View style={{ flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' }}>
@@ -261,17 +261,35 @@ export function DashboardPage({ state, onStateChange }: DashboardPageProps) {
         <View style={styles.heroTopRow}>
           <View style={{ flex: 1, minWidth: 220 }}>
             <Text style={styles.heroEyebrow}>{monthLabel}</Text>
-            <Text style={[styles.heroHeadline, narrow && { fontSize: typography.display }]}>
+            <Text
+              style={[
+                styles.heroHeadline,
+                narrow && { fontSize: typography.display },
+                { fontFamily: typography.fontFamilyDisplay, textShadow: neonGlow.textStrong } as never,
+              ]}
+            >
               Good to see you.
             </Text>
             <Text style={styles.heroSubhead}>
               {summary.unreviewedCount > 0
-                ? `${summary.unreviewedCount} transaction${summary.unreviewedCount === 1 ? '' : 's'} to review this month.`
-                : 'All caught up — nice work.'}
+                ? `${summary.unreviewedCount} entr${summary.unreviewedCount === 1 ? 'y' : 'ies'} await your reckoning this moon.`
+                : 'All caught up — the ledger is at peace.'}
             </Text>
           </View>
-          <View style={styles.heroHealthChip}>
-            <Text style={styles.heroHealthValue}>{health.score}</Text>
+          <View
+            style={[
+              styles.heroHealthChip,
+              { boxShadow: neonGlow.ringStrong } as never,
+            ]}
+          >
+            <Text
+              style={[
+                styles.heroHealthValue,
+                { fontFamily: typography.fontFamilyMono, textShadow: neonGlow.textStrong } as never,
+              ]}
+            >
+              {health.score}
+            </Text>
             <Text style={styles.heroHealthLabel}>{health.label}</Text>
           </View>
         </View>

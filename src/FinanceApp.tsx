@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 
 import { CommandPalette, type CommandAction } from './components/CommandPalette';
+import { LockScreen, useLock } from './components/LockScreen';
 import { Sidebar, type NavItem, type SidebarSummary } from './components/layout/Sidebar';
 import { buildTransactionsCsv } from './finance/export';
 import { serializeFinanceState } from './finance/backup';
@@ -63,9 +64,16 @@ const TAB_ROUTES: ReadonlyArray<NavItem<Tab>> = [
 export default function FinanceApp() {
   return (
     <ThemeProvider>
-      <AppShell />
+      <Gate />
     </ThemeProvider>
   );
+}
+
+/** Renders the lock screen when sealed; the full app once unlocked. */
+function Gate() {
+  const { unlocked, unlock } = useLock();
+  if (!unlocked) return <LockScreen onUnlock={unlock} />;
+  return <AppShell />;
 }
 
 function AppShell() {
