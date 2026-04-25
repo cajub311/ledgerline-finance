@@ -78,13 +78,25 @@ export function Button({
   const paddingH = size === 'sm' ? 12 : size === 'lg' ? 22 : 16;
   const fontSize = size === 'sm' ? typography.small : typography.body;
 
-  const shadow =
-    Platform.OS === 'web' && (variant === 'primary' || variant === 'danger' || variant === 'success')
+  const gradientBg =
+    Platform.OS === 'web' && variant === 'primary'
       ? ({
-          boxShadow:
-            '0 1px 0 rgba(255,220,150,0.25) inset, 0 2px 8px rgba(0,0,0,0.4)',
+          backgroundImage: `linear-gradient(135deg, ${palette.heroGradientStart}, ${palette.heroGradientEnd})`,
         } as unknown as ViewStyle)
       : null;
+
+  const shadow =
+    Platform.OS === 'web' && variant === 'primary'
+      ? ({
+          boxShadow:
+            '0 1px 0 rgba(232,190,255,0.35) inset, 0 0 18px rgba(168,85,247,0.45), 0 4px 14px rgba(0,0,0,0.55)',
+        } as unknown as ViewStyle)
+      : Platform.OS === 'web' && (variant === 'danger' || variant === 'success')
+        ? ({
+            boxShadow:
+              '0 1px 0 rgba(255,255,255,0.18) inset, 0 4px 14px rgba(0,0,0,0.45)',
+          } as unknown as ViewStyle)
+        : null;
 
   return (
     <Pressable
@@ -105,6 +117,7 @@ export function Button({
           alignSelf: fullWidth ? 'stretch' : 'flex-start',
           width: fullWidth ? '100%' : undefined,
         },
+        gradientBg,
         shadow,
         style,
       ]}

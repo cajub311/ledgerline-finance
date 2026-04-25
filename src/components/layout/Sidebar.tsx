@@ -1,7 +1,7 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useTheme } from '../../theme/ThemeContext';
-import { radius, spacing, typography } from '../../theme/tokens';
+import { neonGlow, radius, spacing, typography } from '../../theme/tokens';
 
 export interface NavItem<T extends string> {
   value: T;
@@ -36,7 +36,7 @@ export function Sidebar<T extends string>({
   compact,
   summary,
 }: SidebarProps<T>) {
-  const { palette } = useTheme();
+  const { palette, mode } = useTheme();
 
   if (compact) {
     return (
@@ -47,11 +47,36 @@ export function Sidebar<T extends string>({
         ]}
       >
         <View style={styles.topbarBrandRow}>
-          <View style={[styles.brandMark, { backgroundColor: palette.primary }]}>
-            <Text style={[styles.brandMarkText, { color: palette.primaryText }]}>L</Text>
+          <View
+            style={[
+              styles.brandMark,
+              { backgroundColor: palette.primary },
+              mode === 'dark'
+                ? ({ boxShadow: neonGlow.ringStrong } as unknown as Record<string, string>)
+                : null,
+            ]}
+          >
+            <Text
+              style={[
+                styles.brandMarkText,
+                { color: palette.primaryText, fontFamily: typography.fontFamilyRuneic },
+              ]}
+            >
+              L
+            </Text>
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.brandName, { color: palette.text }]}>Ledgerline</Text>
+            <Text
+              style={[
+                styles.brandName,
+                { color: palette.text },
+                mode === 'dark'
+                  ? ({ textShadow: neonGlow.textStrong } as unknown as Record<string, string>)
+                  : null,
+              ]}
+            >
+              Ledgerline
+            </Text>
             <Text style={[styles.brandTagline, { color: palette.textSubtle }]}>
               A PRIVATE LEDGER
             </Text>

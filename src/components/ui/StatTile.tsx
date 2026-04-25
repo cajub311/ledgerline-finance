@@ -2,7 +2,14 @@ import { StyleSheet, Text, View, type ViewStyle } from 'react-native';
 
 import { Sparkline } from '../charts/Sparkline';
 import { useTheme } from '../../theme/ThemeContext';
-import { elevation, radius, spacing, typography } from '../../theme/tokens';
+import {
+  elevation,
+  glassSurface,
+  neonGlow,
+  radius,
+  spacing,
+  typography,
+} from '../../theme/tokens';
 
 export type StatTone = 'neutral' | 'positive' | 'warning' | 'danger' | 'primary';
 
@@ -43,6 +50,7 @@ export function StatTile({
       style={[
         styles.tile,
         { backgroundColor: palette.surface, borderColor: palette.borderSoft },
+        glassSurface(mode),
         elevation(1, mode),
         style,
       ]}
@@ -52,6 +60,11 @@ export function StatTile({
         style={[
           styles.value,
           { color: toneColor, fontFamily: typography.fontFamilyMono },
+          mode === 'dark' && tone !== 'neutral'
+            ? ({ textShadow: neonGlow.textStrong } as unknown as ViewStyle)
+            : mode === 'dark'
+              ? ({ textShadow: neonGlow.textSoft } as unknown as ViewStyle)
+              : null,
         ]}
       >
         {value}

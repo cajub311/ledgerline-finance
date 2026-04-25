@@ -2,7 +2,14 @@ import type { ReactNode } from 'react';
 import { StyleSheet, Text, View, type ViewStyle } from 'react-native';
 
 import { useTheme } from '../../theme/ThemeContext';
-import { elevation, radius, spacing, typography } from '../../theme/tokens';
+import {
+  elevation,
+  glassSurface,
+  neonGlow,
+  radius,
+  spacing,
+  typography,
+} from '../../theme/tokens';
 
 interface CardProps {
   title?: string;
@@ -34,6 +41,7 @@ export function Card({
           borderColor: palette.borderSoft,
           padding,
         },
+        glassSurface(mode),
         level === 0 ? undefined : elevation(level === 1 ? 1 : 2, mode),
         style,
       ]}
@@ -53,6 +61,9 @@ export function Card({
                       color: palette.text,
                       fontFamily: typography.fontFamilyDisplay,
                     },
+                    mode === 'dark'
+                      ? ({ textShadow: neonGlow.textSoft } as unknown as ViewStyle)
+                      : null,
                   ]}
                 >
                   {title}

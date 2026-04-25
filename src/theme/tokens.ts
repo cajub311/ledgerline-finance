@@ -34,63 +34,63 @@ export interface ThemePalette {
 }
 
 const dark: ThemePalette = {
-  bg: '#0a0608',
-  bgElevated: '#120c0e',
-  surface: '#181113',
-  surfaceRaised: '#221619',
-  surfaceSunken: '#0d0809',
-  border: '#3a2228',
-  borderSoft: '#241418',
-  text: '#f1e4cf',
-  textMuted: '#a89074',
-  textSubtle: '#6b5746',
-  primary: '#c9a14a',
-  primaryText: '#0a0608',
-  primarySoft: 'rgba(201,161,74,0.14)',
-  primaryStrong: '#e6bc5e',
-  accent: '#7d2c2c',
-  accentSoft: 'rgba(125,44,44,0.20)',
-  success: '#5a9070',
-  successSoft: 'rgba(90,144,112,0.16)',
-  warning: '#c9a14a',
-  warningSoft: 'rgba(201,161,74,0.18)',
-  danger: '#9c3a3a',
-  dangerSoft: 'rgba(156,58,58,0.18)',
-  info: '#7e8a9c',
-  infoSoft: 'rgba(126,138,156,0.18)',
-  overlay: 'rgba(0,0,0,0.82)',
-  heroGradientStart: '#1a0d10',
-  heroGradientEnd: '#3a1a1f',
+  bg: '#0a0214',
+  bgElevated: '#140524',
+  surface: 'rgba(29,11,50,0.78)',
+  surfaceRaised: 'rgba(42,18,68,0.86)',
+  surfaceSunken: '#0f0618',
+  border: '#5a2d8a',
+  borderSoft: 'rgba(185,131,255,0.22)',
+  text: '#e5d9ff',
+  textMuted: '#a78fd4',
+  textSubtle: '#6d5a92',
+  primary: '#a855f7',
+  primaryText: '#0a0214',
+  primarySoft: 'rgba(168,85,247,0.22)',
+  primaryStrong: '#c084fc',
+  accent: '#e879f9',
+  accentSoft: 'rgba(232,121,249,0.22)',
+  success: '#6ee7b7',
+  successSoft: 'rgba(110,231,183,0.16)',
+  warning: '#fbbf24',
+  warningSoft: 'rgba(251,191,36,0.18)',
+  danger: '#f472b6',
+  dangerSoft: 'rgba(244,114,182,0.18)',
+  info: '#818cf8',
+  infoSoft: 'rgba(129,140,248,0.18)',
+  overlay: 'rgba(5,0,15,0.82)',
+  heroGradientStart: '#2a004d',
+  heroGradientEnd: '#5a00a3',
 };
 
 const light: ThemePalette = {
-  bg: '#f1e8d4',
-  bgElevated: '#f8f1de',
-  surface: '#fbf4e0',
+  bg: '#f4efff',
+  bgElevated: '#faf7ff',
+  surface: '#ffffff',
   surfaceRaised: '#ffffff',
-  surfaceSunken: '#e7dcc4',
-  border: '#b8a87f',
-  borderSoft: '#d4c5a0',
-  text: '#1a0d10',
-  textMuted: '#5a4338',
-  textSubtle: '#8a7460',
-  primary: '#7d2c2c',
-  primaryText: '#fbf4e0',
-  primarySoft: 'rgba(125,44,44,0.10)',
-  primaryStrong: '#5a1d1d',
-  accent: '#a17a2a',
-  accentSoft: 'rgba(161,122,42,0.14)',
-  success: '#3d6b50',
-  successSoft: 'rgba(61,107,80,0.10)',
-  warning: '#9c6f1c',
-  warningSoft: 'rgba(156,111,28,0.12)',
-  danger: '#8a2828',
-  dangerSoft: 'rgba(138,40,40,0.10)',
-  info: '#4a566a',
-  infoSoft: 'rgba(74,86,106,0.12)',
-  overlay: 'rgba(26,13,16,0.50)',
-  heroGradientStart: '#7d2c2c',
-  heroGradientEnd: '#a17a2a',
+  surfaceSunken: '#ede5fc',
+  border: '#c4a6eb',
+  borderSoft: '#ddc8f5',
+  text: '#1a0b2e',
+  textMuted: '#4a2e7a',
+  textSubtle: '#7d5ba8',
+  primary: '#7c3aed',
+  primaryText: '#ffffff',
+  primarySoft: 'rgba(124,58,237,0.10)',
+  primaryStrong: '#5b21b6',
+  accent: '#a855f7',
+  accentSoft: 'rgba(168,85,247,0.14)',
+  success: '#10b981',
+  successSoft: 'rgba(16,185,129,0.10)',
+  warning: '#d97706',
+  warningSoft: 'rgba(217,119,6,0.12)',
+  danger: '#db2777',
+  dangerSoft: 'rgba(219,39,119,0.10)',
+  info: '#4f46e5',
+  infoSoft: 'rgba(79,70,229,0.10)',
+  overlay: 'rgba(26,11,46,0.45)',
+  heroGradientStart: '#7c3aed',
+  heroGradientEnd: '#a855f7',
 };
 
 export const palettes: Record<ThemeMode, ThemePalette> = { light, dark };
@@ -123,44 +123,79 @@ export const typography = {
   small: 12,
   micro: 11,
   fontFamilyDisplay: '"Cinzel", "Cormorant Garamond", Georgia, serif',
+  fontFamilyRuneic: '"Uncial Antiqua", "Cinzel", Georgia, serif',
   fontFamilyBody: '"Cormorant Garamond", "Iowan Old Style", Georgia, serif',
   fontFamilyUi: 'system-ui, -apple-system, "Segoe UI", sans-serif',
   fontFamilyMono: '"IBM Plex Mono", "JetBrains Mono", ui-monospace, monospace',
+} as const;
+
+/**
+ * Violet neon glow strings. Use as `textShadow` / `boxShadow` values —
+ * layered bloom gives display glyphs an illuminated-reliquary feel
+ * against the deep-purple body gradient.
+ */
+export const neonGlow = {
+  textSoft:
+    '0 0 8px rgba(185,131,255,0.45), 0 0 18px rgba(122,0,255,0.30)',
+  textStrong:
+    '0 0 10px rgba(232,190,255,0.70), 0 0 22px rgba(168,85,247,0.55), 0 0 40px rgba(122,0,255,0.35)',
+  ring: '0 0 28px rgba(168,85,247,0.35)',
+  ringStrong:
+    '0 0 44px rgba(168,85,247,0.55), 0 0 0 1px rgba(185,131,255,0.35) inset',
 } as const;
 
 /** Elevation shadows. Web gets real box-shadow; native falls back to elevation. */
 export function elevation(level: 1 | 2 | 3, mode: ThemeMode = 'dark') {
   if (Platform.OS === 'web') {
     if (mode === 'dark') {
-      const blur = level === 1 ? 8 : level === 2 ? 22 : 44;
-      const y = level === 1 ? 2 : level === 2 ? 12 : 26;
-      const goldGlow = level === 3 ? ', 0 0 1px rgba(201,161,74,0.30)' : '';
+      const base =
+        level === 1
+          ? '0 2px 10px rgba(0,0,0,0.55), 0 0 16px rgba(168,85,247,0.08)'
+          : level === 2
+            ? '0 12px 28px rgba(0,0,0,0.60), 0 0 28px rgba(168,85,247,0.22)'
+            : '0 24px 56px rgba(0,0,0,0.70), 0 0 48px rgba(168,85,247,0.32)';
       return {
-        boxShadow: `0 ${y}px ${blur}px rgba(0,0,0,0.65)${goldGlow}` as unknown as undefined,
+        boxShadow: base as unknown as undefined,
       };
     }
     const blur = level === 1 ? 6 : level === 2 ? 18 : 36;
     const y = level === 1 ? 2 : level === 2 ? 8 : 20;
     return {
-      boxShadow: `0 ${y}px ${blur}px rgba(60,40,20,0.18)` as unknown as undefined,
+      boxShadow: `0 ${y}px ${blur}px rgba(60,30,90,0.18)` as unknown as undefined,
     };
   }
   return { elevation: level * 2 };
 }
 
+/**
+ * Glassmorphism panel style — semi-transparent surface + web
+ * `backdropFilter` blur. Whatever sits behind the panel (the radial
+ * purple body gradient, the raven/cathedral illustrations) bleeds
+ * through softly. No-op on native.
+ */
+export function glassSurface(mode: ThemeMode = 'dark') {
+  if (Platform.OS === 'web' && mode === 'dark') {
+    return {
+      backdropFilter: 'blur(14px) saturate(140%)',
+      WebkitBackdropFilter: 'blur(14px) saturate(140%)',
+    } as unknown as Record<string, string>;
+  }
+  return {} as Record<string, string>;
+}
+
 export const categoryColors: Record<string, string> = {
-  Income: '#5a9070',
-  Housing: '#7d2c2c',
-  Utilities: '#c9a14a',
-  Groceries: '#5a7d8c',
-  Dining: '#9c3a3a',
-  Fuel: '#6b5a8c',
-  Travel: '#3d6b6b',
-  Subscriptions: '#8c4a7d',
-  Shopping: '#c9743a',
-  Health: '#a83a5a',
-  Transfer: '#7e8a9c',
-  Fees: '#7d2c2c',
-  Savings: '#3d6b50',
-  Other: '#8a7460',
+  Income: '#6ee7b7',
+  Housing: '#a855f7',
+  Utilities: '#fbbf24',
+  Groceries: '#38bdf8',
+  Dining: '#f472b6',
+  Fuel: '#fb7185',
+  Travel: '#2dd4bf',
+  Subscriptions: '#e879f9',
+  Shopping: '#fb923c',
+  Health: '#f472b6',
+  Transfer: '#a78fd4',
+  Fees: '#f87171',
+  Savings: '#34d399',
+  Other: '#9ca3af',
 };
