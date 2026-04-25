@@ -62,6 +62,22 @@ Long URLs like `ledgernew-73eg17j77-cajub311s-projects.vercel.app` are **one dep
 
 Both projects can be linked to the same GitHub repo; use **Deployments → Production** in the dashboard to see which commit is live. Pushes to `main` update production, not old preview links.
 
+### Why a preview URL can look “broken” (spinner forever or blank)
+
+If **Vercel Authentication** (Deployment Protection) is enabled for your team or project, **unauthenticated** requests to a **deployment URL** (`*.vercel.app` subdomains) can return **401** for HTML and for `/_expo/static/...` JavaScript. The page shell may load while scripts do not, so the app never mounts.
+
+- **Use the production alias** for a normal public link; it should return **200** for `/` and for `/_expo/static/js/web/*.js`.
+- **Or** in the Vercel dashboard: **Project → Settings → Deployment Protection**, relax protection for preview deployments, or use a shareable link / logged-in access for that deployment.
+- Quick check: `curl -sI 'https://YOUR-DEPLOYMENT-URL/_expo/static/js/web/…'` — if you see **401**, protection is blocking assets.
+
+### Optional web password (static deploys)
+
+To add a simple password screen **before** the app on web builds only, set this **build-time** variable in Vercel (or your CI) and redeploy:
+
+- **`EXPO_PUBLIC_WEB_ACCESS_PASSWORD`** — non-empty string users must enter once per browser tab (`sessionStorage`). Leave unset for no gate.
+
+Native (iOS/Android) builds ignore this gate.
+
 CLI deploy:
 
 ```bash
@@ -83,6 +99,8 @@ vercel deploy -y --no-wait
 - `public/index.html` — web template (do not use a `src/app` folder here — Expo treats it as Expo Router)
 
 ## For agents / contributors
+
+For Cursor Cloud / agent quick-start (commands and tooling quirks), see [`AGENTS.md`](./AGENTS.md).
 
 If you're picking up work on Ledgerline, read
 [`COMPOSER_BOT_README.md`](./COMPOSER_BOT_README.md) first. It captures the
