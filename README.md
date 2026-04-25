@@ -12,7 +12,7 @@ Everything is organized into focused tabs:
 - **Import & export** — drag & drop CSV / XLSX / PDF statements from any bank (headers detected automatically) or paste raw text. Export filtered subsets to CSV, a print‑ready **PDF statement**, **QIF** (Quicken / GnuCash / Moneydance), **OFX** (per‑account bank format), or a full JSON backup. **Undo** the last import with one click.
 - **Settings** — switch between light and dark mode, rename your household, and reset to demo data.
 
-The app is 100% client-side: transactions live in your browser (AsyncStorage / localStorage). Saves are debounced so typing does not write on every keystroke.
+The app is 100% client-side: transactions live in your browser (AsyncStorage / localStorage under `ledgerline/finance-state-v2`). Saves are debounced and also flush when you switch away from the tab or close it, so your ledger is not lost mid-session. Clearing site data or a different browser profile starts fresh — use **Import & export → JSON backup** for a portable copy you can restore later.
 
 ## Requirements
 

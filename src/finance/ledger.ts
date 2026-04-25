@@ -292,18 +292,31 @@ export function rehydrateFinanceState(snapshot: Partial<FinanceState> | null | u
     return seed;
   }
 
+  // Use `Array.isArray` (not truthiness on `.length`) so an intentional empty
+  // ledger — e.g. after "Start fresh" — round-trips instead of reverting to demo seed.
+  const accounts = Array.isArray(snapshot.accounts)
+    ? cloneAccounts(snapshot.accounts as FinanceAccount[])
+    : seed.accounts;
+  const transactions = Array.isArray(snapshot.transactions)
+    ? cloneTransactions(snapshot.transactions as FinanceTransaction[]).map(normalizeTransaction)
+    : seed.transactions;
+  const imports = Array.isArray(snapshot.imports)
+    ? cloneImports(snapshot.imports as ImportRecord[])
+    : seed.imports;
+  const budgets = Array.isArray(snapshot.budgets) ? cloneBudgets(snapshot.budgets as Budget[]) : seed.budgets;
+  const goals = Array.isArray(snapshot.goals) ? cloneGoals(snapshot.goals as FinancialGoal[]) : seed.goals;
+  const rules = Array.isArray(snapshot.rules) ? cloneRules(snapshot.rules as FinanceRule[]) : seed.rules;
+
   return {
     version: 1,
     householdName: snapshot.householdName ?? seed.householdName,
     currency: snapshot.currency ?? 'USD',
-    accounts: cloneAccounts(snapshot.accounts?.length ? (snapshot.accounts as FinanceAccount[]) : seed.accounts),
-    transactions: cloneTransactions(
-      snapshot.transactions?.length ? (snapshot.transactions as FinanceTransaction[]) : seed.transactions,
-    ).map(normalizeTransaction),
-    imports: cloneImports(snapshot.imports?.length ? (snapshot.imports as ImportRecord[]) : seed.imports),
-    budgets: cloneBudgets(snapshot.budgets ?? seed.budgets),
-    goals: cloneGoals(snapshot.goals ?? seed.goals),
-    rules: cloneRules(Array.isArray(snapshot.rules) ? snapshot.rules : seed.rules),
+    accounts,
+    transactions,
+    imports,
+    budgets,
+    goals,
+    rules,
     preferences: mergePreferences(snapshot.preferences ?? seed.preferences),
   };
 }

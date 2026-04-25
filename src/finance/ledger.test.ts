@@ -552,6 +552,18 @@ test('createEmptyFinanceState returns a blank ledger with a single placeholder a
   assert.equal(state.accounts[0].source, 'manual');
 });
 
+test('rehydrateFinanceState preserves empty arrays (no demo seed bleed-through)', () => {
+  const empty = createEmptyFinanceState();
+  const json = JSON.parse(JSON.stringify(empty)) as Partial<FinanceState>;
+  const roundTrip = rehydrateFinanceState(json);
+  assert.equal(roundTrip.transactions.length, 0);
+  assert.equal(roundTrip.imports.length, 0);
+  assert.equal(roundTrip.budgets.length, 0);
+  assert.equal(roundTrip.goals.length, 0);
+  assert.equal(roundTrip.rules.length, 0);
+  assert.equal(roundTrip.accounts.length, 1);
+});
+
 test('isSeedState is true for the factory seed and false after a user manual tx', () => {
   const seed = createFinanceState();
   assert.equal(isSeedState(seed), true);
